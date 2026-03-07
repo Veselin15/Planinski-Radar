@@ -1,0 +1,50 @@
+version: "3.9"
+
+services:
+  postgres:
+    # Postgres image with PostGIS extension preinstalled.
+    image: postgis/postgis:15-3.3
+    container_name: planinski_postgres
+    restart: unless-stopped
+    environment:
+      # Database credentials and default database name.
+      POSTGRES_DB: planinski_radar
+      POSTGRES_USER: planinski_user
+      POSTGRES_PASSWORD: planinski_password
+    ports:
+      # Expose PostgreSQL to host for local development.
+      - "5432:5432"
+    volumes:
+      # Persist PostgreSQL data between container restarts.
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Ensure DB is ready before dependent services start.
+      test: ["CMD-SHELL", "pg_isready -U planinski_user -d planinski_radar"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    # Redis broker/cache for Celery and app caching.
+    image: redis:7-alpine
+    container_name: planinski_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      # Expose Redis to host for local development.
+      - "6379:6379"
+    volumes:
+      # Persist Redis append-only data.
+      - redis_data:/data
+    healthcheck:
+      # Simple health check that expects PONG.
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  # Named volume for PostgreSQL data persistence.
+  postgres_data:
+  # Named volume for Redis data persistence.
+  redis_data:
