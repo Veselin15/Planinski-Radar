@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { signIn, signOut, useSession } from "next-auth/react";
 import { FormEvent, useState } from "react";
 
 const InteractiveMap = dynamic(() => import("../../components/InteractiveMap"), {
@@ -8,13 +9,19 @@ const InteractiveMap = dynamic(() => import("../../components/InteractiveMap"), 
 });
 
 export default function MapPage() {
+  const { data: session } = useSession();
   const [isAddingMode, setIsAddingMode] = useState(false);
+  const [locateTrigger, setLocateTrigger] = useState(0);
+  const [activeFilter, setActiveFilter] = useState<"all" | "huts" | "hazards">(
+    "all",
+  );
   const [selectedLocation, setSelectedLocation] = useState<{
     lat: number;
     lng: number;
   } | null>(null);
-  const [category, setCategory] = useState("avalanche");
+  const [selectedCategory, setSelectedCategory] = useState("avalanche");
   const [description, setDescription] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const toggleAddingMode = () => {
@@ -28,9 +35,25 @@ export default function MapPage() {
     });
   };
 
+  const handleHazardAction = async () => {
+    // Require authentication before entering hazard reporting mode.
+    if (!session) {
+      alert("Моля, влезте в профила си, за да подадете сигнал.");
+      await signIn("google");
+      return;
+    }
+
+    toggleAddingMode();
+  };
+
   const handleLocationSelect = (lat: number, lng: number) => {
     // Store the clicked map coordinates to prefill form submission target.
     setSelectedLocation({ lat, lng });
+  };
+
+  const handleLocateMe = () => {
+    // Increment a trigger counter so the map can start geolocation on demand.
+    setLocateTrigger((previous) => previous + 1);
   };
 
   const handleSubmitHazard = async (event: FormEvent<HTMLFormElement>) => {
@@ -39,24 +62,37 @@ export default function MapPage() {
       return;
     }
 
+    if (!session) {
+      // Protect API from anonymous submissions even if the form is somehow open.
+      alert("Моля, влезте в профила си, за да подадете сигнал.");
+      await signIn("google");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
-      // Send a GeoJSON-compatible payload expected by the DRF endpoint.
+      // Build multipart payload so text fields and image upload can be sent together.
+      const formData = new FormData();
+      formData.append("category", selectedCategory);
+      formData.append("description", description);
+      formData.append("is_active", "true");
+      formData.append("author_name", session.user?.name || "Anonymous");
+      formData.append(
+        "location",
+        JSON.stringify({
+          type: "Point",
+          coordinates: [selectedLocation.lng, selectedLocation.lat],
+        }),
+      );
+      if (imageFile) {
+        formData.append("image", imageFile);
+      }
+
+      // Let the browser set multipart headers with the correct boundary.
       const response = await fetch("http://localhost:8000/api/hazards/", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          location: {
-            type: "Point",
-            coordinates: [selectedLocation.lng, selectedLocation.lat],
-          },
-          category,
-          description,
-          is_active: true,
-        }),
+        body: formData,
       });
 
       if (!response.ok) {
@@ -66,6 +102,7 @@ export default function MapPage() {
       // Reset interaction state and refresh markers after successful submission.
       setSelectedLocation(null);
       setIsAddingMode(false);
+      setImageFile(null);
       window.location.reload();
     } catch (error) {
       // Log failures so we can add user-facing toasts in a later iteration.
@@ -82,6 +119,8 @@ export default function MapPage() {
         <InteractiveMap
           isAddingMode={isAddingMode}
           onLocationSelect={handleLocationSelect}
+          locateTrigger={locateTrigger}
+          activeFilter={activeFilter}
         />
       </div>
 
@@ -91,23 +130,74 @@ export default function MapPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white transition hover:bg-white/20"
+              onClick={() => setActiveFilter("all")}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                activeFilter === "all"
+                  ? "bg-blue-600 text-white"
+                  : "text-slate-300 hover:text-white"
+              }`}
             >
               🏔️ Всички
             </button>
             <button
               type="button"
-              className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white transition hover:bg-white/20"
+              onClick={() => setActiveFilter("huts")}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                activeFilter === "huts"
+                  ? "bg-blue-600 text-white"
+                  : "text-slate-300 hover:text-white"
+              }`}
             >
               🏕️ Хижи
             </button>
             <button
               type="button"
-              className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white transition hover:bg-white/20"
+              onClick={() => setActiveFilter("hazards")}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                activeFilter === "hazards"
+                  ? "bg-blue-600 text-white"
+                  : "text-slate-300 hover:text-white"
+              }`}
             >
               ⚠️ Опасности
             </button>
           </div>
+        </div>
+
+        <div className="pointer-events-auto ml-2 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-2 shadow-lg backdrop-blur-md">
+          {session ? (
+            <div className="flex items-center gap-2">
+              {session.user?.image ? (
+                <img
+                  src={session.user.image}
+                  alt="Профилна снимка"
+                  className="h-7 w-7 rounded-full border border-slate-600 object-cover"
+                />
+              ) : (
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-700 text-xs text-white">
+                  👤
+                </span>
+              )}
+              <span className="max-w-24 truncate text-xs font-medium text-white">
+                {session.user?.name || "Потребител"}
+              </span>
+              <button
+                type="button"
+                onClick={() => signOut()}
+                className="rounded-full bg-slate-700 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-slate-600"
+              >
+                Изход
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => signIn("google")}
+              className="rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-blue-500"
+            >
+              Вход с Google
+            </button>
+          )}
         </div>
       </div>
 
@@ -119,10 +209,20 @@ export default function MapPage() {
         </div>
       )}
 
+      {/* Add a quick locate button above the main action button. */}
+      <button
+        type="button"
+        onClick={handleLocateMe}
+        aria-label="Покажи моята локация"
+        className="absolute bottom-28 right-6 z-10 w-12 h-12 bg-white text-slate-800 rounded-full shadow-lg flex items-center justify-center text-xl transition-transform active:scale-95"
+      >
+        🎯
+      </button>
+
       {/* Provide a large floating action button for quick hazard reporting. */}
       <button
         type="button"
-        onClick={toggleAddingMode}
+        onClick={handleHazardAction}
         aria-label="Добави сигнал за опасност"
         className="pointer-events-auto absolute bottom-8 right-6 z-10 flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-3xl text-white shadow-2xl transition-transform hover:bg-red-500 active:scale-95"
       >
@@ -142,8 +242,8 @@ export default function MapPage() {
               </label>
               <select
                 id="hazard-category"
-                value={category}
-                onChange={(event) => setCategory(event.target.value)}
+                value={selectedCategory}
+                onChange={(event) => setSelectedCategory(event.target.value)}
                 className="h-11 w-full rounded-xl border border-slate-600 bg-slate-800 px-3 text-sm text-white focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
               >
                 <option value="avalanche">Лавина</option>
@@ -169,6 +269,13 @@ export default function MapPage() {
                 className="w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
               />
             </div>
+
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(event) => setImageFile(event.target.files?.[0] || null)}
+              className="w-full text-sm text-slate-400 file:mr-4 file:rounded-full file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
+            />
 
             <button
               type="submit"

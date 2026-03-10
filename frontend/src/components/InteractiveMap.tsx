@@ -3,7 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { MapContainer, Marker, Popup, TileLayer, useMapEvents } from "react-leaflet";
+import {
+  CircleMarker,
+  MapContainer,
+  Marker,
+  Popup,
+  TileLayer,
+  useMapEvents,
+} from "react-leaflet";
 
 type PointGeometry = {
   type: "Point";
@@ -30,7 +37,9 @@ type HutProperties = {
 type HazardProperties = {
   category?: string;
   description?: string;
+  image?: string | null;
   upvotes?: number;
+  author_name?: string;
 };
 
 // Use a custom HTML icon to visually distinguish hut points.
@@ -54,6 +63,8 @@ const hazardIcon = L.divIcon({
 type InteractiveMapProps = {
   isAddingMode?: boolean;
   onLocationSelect?: (lat: number, lng: number) => void;
+  locateTrigger?: number;
+  activeFilter: "all" | "huts" | "hazards";
 };
 
 type MapClickHandlerProps = {
@@ -76,9 +87,60 @@ function MapClickHandler({ isAddingMode, onLocationSelect }: MapClickHandlerProp
   return null;
 }
 
+type UserLocationMarkerProps = {
+  locateTrigger: number;
+};
+
+function UserLocationMarker({ locateTrigger }: UserLocationMarkerProps) {
+  const [userLocation, setUserLocation] = useState<L.LatLng | null>(null);
+
+  // Subscribe to geolocation events and keep user position synced on the map.
+  const map = useMapEvents({
+    locationfound(event) {
+      setUserLocation(event.latlng);
+      map.flyTo(event.latlng, map.getZoom());
+    },
+    locationerror() {
+      // Keep errors non-blocking when permission is delayed or denied.
+      console.warn("Location access delayed or denied.");
+    },
+  });
+
+  useEffect(() => {
+    // Trigger browser geolocation every time the parent increments locateTrigger.
+    if (locateTrigger > 0) {
+      map.locate({
+        setView: true,
+        maxZoom: 16,
+        timeout: 15000,
+        enableHighAccuracy: true,
+      });
+    }
+  }, [locateTrigger, map]);
+
+  if (!userLocation) {
+    return null;
+  }
+
+  return (
+    <CircleMarker
+      center={userLocation}
+      radius={8}
+      pathOptions={{
+        fillColor: "#3b82f6",
+        color: "white",
+        weight: 2,
+        fillOpacity: 1,
+      }}
+    />
+  );
+}
+
 export default function InteractiveMap({
   isAddingMode = false,
   onLocationSelect,
+  locateTrigger = 0,
+  activeFilter,
 }: InteractiveMapProps) {
   const [huts, setHuts] = useState<GeoFeature<HutProperties>[]>([]);
   const [hazards, setHazards] = useState<GeoFeature<HazardProperties>[]>([]);
@@ -130,6 +192,74 @@ export default function InteractiveMap({
     };
   }, []);
 
+  const handleUpvote = async (hazardId?: string | number) => {
+    if (hazardId === undefined || hazardId === null) {
+      return;
+    }
+
+    // Apply an optimistic increment so the popup feedback feels immediate.
+    setHazards((previousHazards) =>
+      previousHazards.map((feature) =>
+        feature.id === hazardId
+          ? {
+              ...feature,
+              properties: {
+                ...feature.properties,
+                upvotes: (feature.properties.upvotes ?? 0) + 1,
+              },
+            }
+          : feature,
+      ),
+    );
+
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/hazards/${hazardId}/upvote/`,
+        {
+          method: "POST",
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to upvote hazard.");
+      }
+
+      const data = (await response.json()) as { upvotes?: number };
+      if (typeof data.upvotes === "number") {
+        // Sync local state with backend value in case parallel votes changed the count.
+        setHazards((previousHazards) =>
+          previousHazards.map((feature) =>
+            feature.id === hazardId
+              ? {
+                  ...feature,
+                  properties: {
+                    ...feature.properties,
+                    upvotes: data.upvotes,
+                  },
+                }
+              : feature,
+          ),
+        );
+      }
+    } catch (error) {
+      // Revert optimistic update when the request fails.
+      setHazards((previousHazards) =>
+        previousHazards.map((feature) =>
+          feature.id === hazardId
+            ? {
+                ...feature,
+                properties: {
+                  ...feature.properties,
+                  upvotes: Math.max((feature.properties.upvotes ?? 1) - 1, 0),
+                },
+              }
+            : feature,
+        ),
+      );
+      console.error("Error while upvoting hazard:", error);
+    }
+  };
+
   const center = useMemo<[number, number]>(() => [42.7339, 25.4858], []);
 
   if (!isMounted) {
@@ -141,6 +271,7 @@ export default function InteractiveMap({
       <MapContainer
         center={center}
         zoom={7}
+        maxZoom={17}
         className="h-full w-full z-0"
         scrollWheelZoom
       >
@@ -149,59 +280,81 @@ export default function InteractiveMap({
           isAddingMode={isAddingMode}
           onLocationSelect={onLocationSelect}
         />
+        {/* Render live GPS position marker and follow user location on demand. */}
+        <UserLocationMarker locateTrigger={locateTrigger} />
 
         <TileLayer
+          // OpenTopoMap serves tiles up to zoom level 17, so cap requests accordingly.
+          maxZoom={17}
           attribution='Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)'
           url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
         />
 
-        {huts.map((feature, index) => {
-          const [lng, lat] = feature.geometry.coordinates;
-          return (
-            <Marker
-              key={`hut-${feature.id ?? index}`}
-              position={[lat, lng]}
-              icon={hutIcon}
-            >
-              <Popup>
-                <div className="space-y-1">
-                  <p className="font-semibold">{feature.properties.name ?? "Hut"}</p>
-                  <p className="text-sm text-slate-600">
-                    Elevation:{" "}
-                    {feature.properties.elevation
-                      ? `${feature.properties.elevation} m`
-                      : "N/A"}
-                  </p>
-                </div>
-              </Popup>
-            </Marker>
-          );
-        })}
+        {activeFilter !== "hazards" &&
+          huts.map((feature, index) => {
+            const [lng, lat] = feature.geometry.coordinates;
+            return (
+              <Marker
+                key={`hut-${feature.id ?? index}`}
+                position={[lat, lng]}
+                icon={hutIcon}
+              >
+                <Popup>
+                  <div className="space-y-1">
+                    <p className="font-semibold">{feature.properties.name ?? "Хижа"}</p>
+                    <p className="text-sm text-slate-600">
+                      Надморска височина:{" "}
+                      {feature.properties.elevation
+                        ? `${feature.properties.elevation} m`
+                        : "Няма данни"}
+                    </p>
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
 
-        {hazards.map((feature, index) => {
-          const [lng, lat] = feature.geometry.coordinates;
-          return (
-            <Marker
-              key={`hazard-${feature.id ?? index}`}
-              position={[lat, lng]}
-              icon={hazardIcon}
-            >
-              <Popup>
-                <div className="space-y-1">
-                  <p className="font-semibold">
-                    {feature.properties.category ?? "Hazard"}
-                  </p>
-                  <p className="text-sm text-slate-600">
-                    {feature.properties.description ?? "No description provided."}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Upvotes: {feature.properties.upvotes ?? 0}
-                  </p>
-                </div>
-              </Popup>
-            </Marker>
-          );
-        })}
+        {activeFilter !== "huts" &&
+          hazards.map((feature, index) => {
+            const [lng, lat] = feature.geometry.coordinates;
+            return (
+              <Marker
+                key={`hazard-${feature.id ?? index}`}
+                position={[lat, lng]}
+                icon={hazardIcon}
+              >
+                <Popup>
+                  <div className="space-y-2">
+                    <p className="font-semibold">
+                      {feature.properties.category ?? "Опасност"}
+                    </p>
+                    <p className="text-sm text-slate-600">
+                      {feature.properties.description ?? "Няма добавено описание."}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Подадено от: {feature.properties.author_name ?? "Анонимен"}
+                    </p>
+                    {feature.properties.image ? (
+                      <img
+                        src={feature.properties.image}
+                        alt="Hazard condition"
+                        className="w-full h-32 object-cover rounded-md mt-2 shadow-sm border border-slate-200"
+                        loading="lazy"
+                      />
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => handleUpvote(feature.id)}
+                      disabled={feature.id === undefined || feature.id === null}
+                      className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-blue-300"
+                    >
+                      👍 Потвърди ({feature.properties.upvotes ?? 0})
+                    </button>
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
       </MapContainer>
 
       {/* Render a lightweight overlay legend above the map content. */}
