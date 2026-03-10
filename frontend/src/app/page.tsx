@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { FormEvent, useState } from "react";
 
 type FeatureCardProps = {
@@ -19,6 +20,10 @@ function FeatureCard({ title, description, icon }: FeatureCardProps) {
     </article>
   );
 }
+
+const InteractiveMap = dynamic(() => import("../components/InteractiveMap"), {
+  ssr: false,
+});
 
 export default function Home() {
   const [email, setEmail] = useState("");
@@ -68,6 +73,59 @@ export default function Home() {
             <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-800 sm:text-sm">
               Рискови зони и инциденти
             </span>
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-blue-100 bg-white p-6 shadow-lg shadow-blue-100/60 sm:p-8">
+          <div className="max-w-3xl">
+            <h2 className="text-2xl font-bold text-slate-950 sm:text-3xl">
+              Бъди сред първите, които ще тестват приложението.
+            </h2>
+            <p className="mt-2 text-slate-600">
+              Запиши се за ранна бета и получавай първи достъп до новите
+              функционалности.
+            </p>
+          </div>
+
+          <form
+            onSubmit={handleSubmit}
+            className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center"
+          >
+            <label htmlFor="email" className="sr-only">
+              Твоят имейл адрес
+            </label>
+            <input
+              id="email"
+              type="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="Твоят имейл адрес"
+              className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-base text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 sm:flex-1"
+            />
+            <button
+              type="submit"
+              className="inline-flex h-12 min-w-36 items-center justify-center rounded-xl bg-gradient-to-r from-green-600 to-blue-600 px-6 text-base font-semibold text-white transition hover:from-green-700 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2"
+            >
+              Запиши се
+            </button>
+          </form>
+        </section>
+
+        <section aria-labelledby="map-heading" className="space-y-4">
+          <div className="max-w-2xl">
+            <h2
+              id="map-heading"
+              className="text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl"
+            >
+              Интерактивна карта
+            </h2>
+            <p className="mt-2 text-slate-600">
+              Виж активни сигнали и хижи върху интерактивна карта в реално време.
+            </p>
+          </div>
+          <div className="h-[500px] w-full overflow-hidden rounded-2xl shadow-2xl z-0">
+            <InteractiveMap />
           </div>
         </section>
 
@@ -141,42 +199,6 @@ export default function Home() {
               }
             />
           </div>
-        </section>
-
-        <section className="rounded-3xl border border-blue-100 bg-white p-6 shadow-lg shadow-blue-100/60 sm:p-8">
-          <div className="max-w-3xl">
-            <h2 className="text-2xl font-bold text-slate-950 sm:text-3xl">
-              Бъди сред първите, които ще тестват приложението.
-            </h2>
-            <p className="mt-2 text-slate-600">
-              Запиши се за ранна бета и получавай първи достъп до новите
-              функционалности.
-            </p>
-          </div>
-
-          <form
-            onSubmit={handleSubmit}
-            className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center"
-          >
-            <label htmlFor="email" className="sr-only">
-              Твоят имейл адрес
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="Твоят имейл адрес"
-              className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-base text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 sm:flex-1"
-            />
-            <button
-              type="submit"
-              className="inline-flex h-12 min-w-36 items-center justify-center rounded-xl bg-gradient-to-r from-green-600 to-blue-600 px-6 text-base font-semibold text-white transition hover:from-green-700 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2"
-            >
-              Запиши се
-            </button>
-          </form>
         </section>
 
         <section className="rounded-3xl border border-green-100 bg-gradient-to-r from-green-50 to-blue-50 p-6 sm:p-8">
