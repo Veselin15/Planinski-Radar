@@ -1,4 +1,4 @@
-from rest_framework.viewsets import ReadOnlyModelViewSet
+from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from .models import AtesZone, Hazard, Hut, OfficialAlert
 from .serializers import (
@@ -9,8 +9,8 @@ from .serializers import (
 )
 
 
-class HazardViewSet(ReadOnlyModelViewSet):
-    # Return only active hazards for the map feed.
+class HazardViewSet(ModelViewSet):
+    # Allow reading and creating active hazards from the map workflow.
     queryset = Hazard.objects.filter(is_active=True)
     serializer_class = HazardSerializer
 
