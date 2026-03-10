@@ -3,10 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
-import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+import { MapContainer, Marker, Popup, TileLayer, useMapEvents } from "react-leaflet";
 
 type PointGeometry = {
   type: "Point";
@@ -36,21 +33,53 @@ type HazardProperties = {
   upvotes?: number;
 };
 
-const defaultMarkerIcon = L.icon({
-  iconUrl: markerIcon.src,
-  iconRetinaUrl: markerIcon2x.src,
-  shadowUrl: markerShadow.src,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  tooltipAnchor: [16, -28],
-  shadowSize: [41, 41],
+// Use a custom HTML icon to visually distinguish hut points.
+const hutIcon = L.divIcon({
+  className: "bg-transparent border-none",
+  html: '<div class="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-emerald-500 text-lg shadow-lg">🏕️</div>',
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+  popupAnchor: [0, -16],
 });
 
-// Set a global default marker icon so Leaflet markers render correctly in Next.js.
-L.Marker.prototype.options.icon = defaultMarkerIcon;
+// Use a custom HTML icon to visually distinguish hazard points.
+const hazardIcon = L.divIcon({
+  className: "bg-transparent border-none",
+  html: '<div class="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-red-500 text-sm shadow-lg">⚠️</div>',
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+  popupAnchor: [0, -16],
+});
 
-export default function InteractiveMap() {
+type InteractiveMapProps = {
+  isAddingMode?: boolean;
+  onLocationSelect?: (lat: number, lng: number) => void;
+};
+
+type MapClickHandlerProps = {
+  isAddingMode: boolean;
+  onLocationSelect?: (lat: number, lng: number) => void;
+};
+
+function MapClickHandler({ isAddingMode, onLocationSelect }: MapClickHandlerProps) {
+  // Listen for map clicks and forward coordinates only in add mode.
+  useMapEvents({
+    click(event) {
+      if (!isAddingMode || !onLocationSelect) {
+        return;
+      }
+
+      onLocationSelect(event.latlng.lat, event.latlng.lng);
+    },
+  });
+
+  return null;
+}
+
+export default function InteractiveMap({
+  isAddingMode = false,
+  onLocationSelect,
+}: InteractiveMapProps) {
   const [huts, setHuts] = useState<GeoFeature<HutProperties>[]>([]);
   const [hazards, setHazards] = useState<GeoFeature<HazardProperties>[]>([]);
   const [isMounted, setIsMounted] = useState(false);
@@ -108,51 +137,85 @@ export default function InteractiveMap() {
   }
 
   return (
-    <MapContainer center={center} zoom={7} className="h-full w-full" scrollWheelZoom>
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
+    <div className="relative h-full w-full z-0">
+      <MapContainer
+        center={center}
+        zoom={7}
+        className="h-full w-full z-0"
+        scrollWheelZoom
+      >
+        {/* Keep map click handling isolated in a tiny child helper component. */}
+        <MapClickHandler
+          isAddingMode={isAddingMode}
+          onLocationSelect={onLocationSelect}
+        />
 
-      {huts.map((feature, index) => {
-        const [lng, lat] = feature.geometry.coordinates;
-        return (
-          <Marker key={`hut-${feature.id ?? index}`} position={[lat, lng]}>
-            <Popup>
-              <div className="space-y-1">
-                <p className="font-semibold">{feature.properties.name ?? "Hut"}</p>
-                <p className="text-sm text-slate-600">
-                  Elevation:{" "}
-                  {feature.properties.elevation
-                    ? `${feature.properties.elevation} m`
-                    : "N/A"}
-                </p>
-              </div>
-            </Popup>
-          </Marker>
-        );
-      })}
+        <TileLayer
+          attribution='Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)'
+          url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
+        />
 
-      {hazards.map((feature, index) => {
-        const [lng, lat] = feature.geometry.coordinates;
-        return (
-          <Marker key={`hazard-${feature.id ?? index}`} position={[lat, lng]}>
-            <Popup>
-              <div className="space-y-1">
-                <p className="font-semibold">
-                  {feature.properties.category ?? "Hazard"}
-                </p>
-                <p className="text-sm text-slate-600">
-                  {feature.properties.description ?? "No description provided."}
-                </p>
-                <p className="text-xs text-slate-500">
-                  Upvotes: {feature.properties.upvotes ?? 0}
-                </p>
-              </div>
-            </Popup>
-          </Marker>
-        );
-      })}
-    </MapContainer>
+        {huts.map((feature, index) => {
+          const [lng, lat] = feature.geometry.coordinates;
+          return (
+            <Marker
+              key={`hut-${feature.id ?? index}`}
+              position={[lat, lng]}
+              icon={hutIcon}
+            >
+              <Popup>
+                <div className="space-y-1">
+                  <p className="font-semibold">{feature.properties.name ?? "Hut"}</p>
+                  <p className="text-sm text-slate-600">
+                    Elevation:{" "}
+                    {feature.properties.elevation
+                      ? `${feature.properties.elevation} m`
+                      : "N/A"}
+                  </p>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
+
+        {hazards.map((feature, index) => {
+          const [lng, lat] = feature.geometry.coordinates;
+          return (
+            <Marker
+              key={`hazard-${feature.id ?? index}`}
+              position={[lat, lng]}
+              icon={hazardIcon}
+            >
+              <Popup>
+                <div className="space-y-1">
+                  <p className="font-semibold">
+                    {feature.properties.category ?? "Hazard"}
+                  </p>
+                  <p className="text-sm text-slate-600">
+                    {feature.properties.description ?? "No description provided."}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Upvotes: {feature.properties.upvotes ?? 0}
+                  </p>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
+      </MapContainer>
+
+      {/* Render a lightweight overlay legend above the map content. */}
+      <div className="pointer-events-none absolute bottom-4 left-4 z-[1000] rounded-xl bg-white/80 p-3 shadow-lg backdrop-blur-md">
+        <p className="text-sm font-bold text-slate-900">Легенда</p>
+        <div className="mt-2 flex items-center gap-2 text-sm text-slate-800">
+          <span aria-hidden="true">🏕️</span>
+          <span>Хижи</span>
+        </div>
+        <div className="mt-1 flex items-center gap-2 text-sm text-slate-800">
+          <span aria-hidden="true">⚠️</span>
+          <span>Опасности</span>
+        </div>
+      </div>
+    </div>
   );
 }
