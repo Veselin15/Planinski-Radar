@@ -1,10 +1,36 @@
-version: "3.9"
-
 services:
-  postgres:
+  web:
+    # Django app container with GeoDjango system dependencies.
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: planinski_web
+    restart: unless-stopped
+    working_dir: /app
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      # Mount backend source for live code updates in development.
+      - ./backend:/app
+    ports:
+      # Expose Django development server to host.
+      - "8000:8000"
+    environment:
+      # Database variables consumed by Django settings.
+      POSTGRES_DB: planinski_radar
+      POSTGRES_USER: planinski_user
+      POSTGRES_PASSWORD: planinski_password
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  db:
     # Postgres image with PostGIS extension preinstalled.
     image: postgis/postgis:15-3.3
-    container_name: planinski_postgres
+    container_name: planinski_db
     restart: unless-stopped
     environment:
       # Database credentials and default database name.
@@ -12,7 +38,7 @@ services:
       POSTGRES_USER: planinski_user
       POSTGRES_PASSWORD: planinski_password
     ports:
-      # Expose PostgreSQL to host for local development.
+      # Expose PostGIS to host for local development.
       - "5432:5432"
     volumes:
       # Persist PostgreSQL data between container restarts.
@@ -44,7 +70,7 @@ services:
       retries: 5
 
 volumes:
-  # Named volume for PostgreSQL data persistence.
+  # Named volume for PostGIS data persistence.
   postgres_data:
   # Named volume for Redis data persistence.
   redis_data:
