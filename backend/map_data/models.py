@@ -20,6 +20,8 @@ class Hazard(models.Model):
     image = models.ImageField(upload_to="hazards/", null=True)
     # Community score that increases when users upvote a hazard.
     upvotes = models.IntegerField(default=0)
+    # Public display name for the user who submitted the report.
+    author_name = models.CharField(max_length=100, default="Anonymous")
     # Soft-delete flag controlling whether hazard is visible in the app.
     is_active = models.BooleanField(default=True)
     # Creation timestamp for audit and sorting.

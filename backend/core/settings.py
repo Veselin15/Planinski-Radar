@@ -135,3 +135,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Allow all origins during local development.
 CORS_ALLOW_ALL_ORIGINS = True
+
+# Media file configuration for user-uploaded hazard images.
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')

@@ -8,7 +8,19 @@ class HazardSerializer(GeoFeatureModelSerializer):
     class Meta:
         model = Hazard
         geo_field = "location"
-        fields = "__all__"
+        # Keep explicit fields to guarantee author_name is always exposed in API payloads.
+        fields = [
+            "id",
+            "location",
+            "category",
+            "description",
+            "image",
+            "upvotes",
+            "author_name",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
 
 
 class HutSerializer(GeoFeatureModelSerializer):
