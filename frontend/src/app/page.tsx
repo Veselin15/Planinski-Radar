@@ -125,7 +125,7 @@ export default function Home() {
             </p>
           </div>
           <div className="h-[500px] w-full overflow-hidden rounded-2xl shadow-2xl z-0">
-            <InteractiveMap />
+            <InteractiveMap activeFilter="all" locateTrigger={0} />
           </div>
         </section>
 

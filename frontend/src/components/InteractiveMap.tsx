@@ -65,6 +65,8 @@ type InteractiveMapProps = {
   onLocationSelect?: (lat: number, lng: number) => void;
   locateTrigger?: number;
   activeFilter: "all" | "huts" | "hazards";
+  authToken?: string;
+  onAuthRequired?: () => void;
 };
 
 type MapClickHandlerProps = {
@@ -141,6 +143,8 @@ export default function InteractiveMap({
   onLocationSelect,
   locateTrigger = 0,
   activeFilter,
+  authToken,
+  onAuthRequired,
 }: InteractiveMapProps) {
   const [huts, setHuts] = useState<GeoFeature<HutProperties>[]>([]);
   const [hazards, setHazards] = useState<GeoFeature<HazardProperties>[]>([]);
@@ -196,6 +200,12 @@ export default function InteractiveMap({
     if (hazardId === undefined || hazardId === null) {
       return;
     }
+    if (!authToken) {
+      // Force login before allowing trust votes.
+      alert("Моля, влезте в профила си, за да потвърдите опасност.");
+      onAuthRequired?.();
+      return;
+    }
 
     // Apply an optimistic increment so the popup feedback feels immediate.
     setHazards((previousHazards) =>
@@ -217,6 +227,9 @@ export default function InteractiveMap({
         `http://localhost:8000/api/hazards/${hazardId}/upvote/`,
         {
           method: "POST",
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
         },
       );
 

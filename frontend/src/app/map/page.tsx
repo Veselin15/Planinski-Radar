@@ -1,7 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { signIn, signOut, useSession } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 const InteractiveMap = dynamic(() => import("../../components/InteractiveMap"), {
@@ -10,6 +11,8 @@ const InteractiveMap = dynamic(() => import("../../components/InteractiveMap"), 
 
 export default function MapPage() {
   const { data: session } = useSession();
+  const router = useRouter();
+  const googleIdToken = session?.googleIdToken;
   const [isAddingMode, setIsAddingMode] = useState(false);
   const [locateTrigger, setLocateTrigger] = useState(0);
   const [activeFilter, setActiveFilter] = useState<"all" | "huts" | "hazards">(
@@ -39,7 +42,7 @@ export default function MapPage() {
     // Require authentication before entering hazard reporting mode.
     if (!session) {
       alert("Моля, влезте в профила си, за да подадете сигнал.");
-      await signIn("google");
+      router.push("/auth?callbackUrl=/map");
       return;
     }
 
@@ -65,7 +68,13 @@ export default function MapPage() {
     if (!session) {
       // Protect API from anonymous submissions even if the form is somehow open.
       alert("Моля, влезте в профила си, за да подадете сигнал.");
-      await signIn("google");
+      router.push("/auth?callbackUrl=/map");
+      return;
+    }
+    if (!googleIdToken) {
+      // Require a valid Google ID token before calling protected backend endpoints.
+      alert("Сесията е изтекла. Моля, влезте отново.");
+      router.push("/auth?callbackUrl=/map");
       return;
     }
 
@@ -92,6 +101,9 @@ export default function MapPage() {
       // Let the browser set multipart headers with the correct boundary.
       const response = await fetch("http://localhost:8000/api/hazards/", {
         method: "POST",
+        headers: {
+          Authorization: `Bearer ${googleIdToken}`,
+        },
         body: formData,
       });
 
@@ -121,6 +133,8 @@ export default function MapPage() {
           onLocationSelect={handleLocationSelect}
           locateTrigger={locateTrigger}
           activeFilter={activeFilter}
+          authToken={googleIdToken}
+          onAuthRequired={() => router.push("/auth?callbackUrl=/map")}
         />
       </div>
 
@@ -192,7 +206,7 @@ export default function MapPage() {
           ) : (
             <button
               type="button"
-              onClick={() => signIn("google")}
+              onClick={() => router.push("/auth?callbackUrl=/map")}
               className="rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-blue-500"
             >
               Вход с Google
