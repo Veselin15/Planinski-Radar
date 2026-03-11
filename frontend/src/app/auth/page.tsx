@@ -37,6 +37,7 @@ export default function AuthPage() {
         <button
           type="button"
           onClick={handleGoogleAuth}
+          data-testid="google-signin-button"
           disabled={status === "loading"}
           className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-blue-400"
         >
