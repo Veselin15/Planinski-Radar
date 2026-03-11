@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useEffect, useMemo, useState } from "react";
+import { useOnlineStatus } from "../hooks/useOnlineStatus";
 
 type FeedItem = {
   item_type: "hazard" | "official_alert";
@@ -29,6 +30,7 @@ type HealthResponse = {
 
 export default function Home() {
   const { data: session } = useSession();
+  const isOnline = useOnlineStatus();
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [feedCount, setFeedCount] = useState(0);
   const [activeHazards, setActiveHazards] = useState(0);
@@ -86,6 +88,12 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-950 text-white">
       <div className="mx-auto w-full max-w-md px-4 pb-8 pt-6">
+        {!isOnline ? (
+          <div className="mb-4 rounded-xl border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-200">
+            Няма връзка с интернет. Показваме последно кеширани данни.
+          </div>
+        ) : null}
+
         <header className="mb-5 rounded-3xl border border-slate-700 bg-slate-900/80 p-4 shadow-xl backdrop-blur-md">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
             Планински Радар
