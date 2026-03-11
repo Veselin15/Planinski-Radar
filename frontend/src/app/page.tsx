@@ -1,243 +1,180 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { FormEvent, useState } from "react";
+import Link from "next/link";
+import { useSession } from "next-auth/react";
+import { useEffect, useMemo, useState } from "react";
 
-type FeatureCardProps = {
+type FeedItem = {
+  item_type: "hazard" | "official_alert";
+  id: number;
   title: string;
   description: string;
-  icon: React.ReactNode;
+  source?: string;
+  author_name?: string;
+  created_at: string;
 };
 
-function FeatureCard({ title, description, icon }: FeatureCardProps) {
-  return (
-    <article className="rounded-2xl border border-blue-100 bg-white/90 p-6 shadow-sm backdrop-blur">
-      <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-green-100 to-blue-100 text-blue-700">
-        {icon}
-      </div>
-      <h3 className="mb-2 text-lg font-semibold text-slate-900">{title}</h3>
-      <p className="text-sm leading-6 text-slate-600">{description}</p>
-    </article>
-  );
-}
+type FeedResponse = {
+  count: number;
+  results: FeedItem[];
+};
 
-const InteractiveMap = dynamic(() => import("../components/InteractiveMap"), {
-  ssr: false,
-});
+type HealthResponse = {
+  metrics?: {
+    active_hazards?: number;
+    active_official_alerts?: number;
+    latest_webcam_snapshot_at?: string | null;
+  };
+};
 
 export default function Home() {
-  const [email, setEmail] = useState("");
+  const { data: session } = useSession();
+  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [feedCount, setFeedCount] = useState(0);
+  const [activeHazards, setActiveHazards] = useState(0);
+  const [activeOfficialAlerts, setActiveOfficialAlerts] = useState(0);
+  const [latestSnapshotAt, setLatestSnapshotAt] = useState<string | null>(null);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail) {
-      return;
-    }
+  useEffect(() => {
+    const abortController = new AbortController();
 
-    // Temporary behavior until backend integration is added.
-    console.log("Ранен абонамент:", trimmedEmail);
-    setEmail("");
-  };
+    const loadDashboardData = async () => {
+      try {
+        // Load feed and health snapshots in parallel for fast dashboard render.
+        const [feedResponse, healthResponse] = await Promise.all([
+          fetch("http://localhost:8000/api/feed/?page_size=8", {
+            signal: abortController.signal,
+          }),
+          fetch("http://localhost:8000/api/system/health/", {
+            signal: abortController.signal,
+          }),
+        ]);
+
+        if (!feedResponse.ok || !healthResponse.ok) {
+          throw new Error("Failed to load dashboard data.");
+        }
+
+        const feedData = (await feedResponse.json()) as FeedResponse;
+        const healthData = (await healthResponse.json()) as HealthResponse;
+
+        setFeed(feedData.results ?? []);
+        setFeedCount(feedData.count ?? 0);
+        setActiveHazards(healthData.metrics?.active_hazards ?? 0);
+        setActiveOfficialAlerts(healthData.metrics?.active_official_alerts ?? 0);
+        setLatestSnapshotAt(healthData.metrics?.latest_webcam_snapshot_at ?? null);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.error("Error while loading home dashboard:", error);
+        }
+      }
+    };
+
+    loadDashboardData();
+    const intervalId = window.setInterval(loadDashboardData, 60000);
+
+    return () => {
+      abortController.abort();
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  const greeting = useMemo(
+    () => (session?.user?.name ? `Здравей, ${session.user.name}` : "Добре дошли"),
+    [session?.user?.name],
+  );
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-green-50 via-sky-50 to-white text-slate-900">
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-16 px-4 py-8 sm:px-6 sm:py-12 lg:gap-20 lg:px-8">
-        <section className="rounded-3xl border border-green-100 bg-white/85 p-6 shadow-xl shadow-sky-100/60 backdrop-blur sm:p-10">
-          <span className="mb-5 inline-flex items-center rounded-full border border-green-200 bg-green-100 px-4 py-1 text-xs font-semibold uppercase tracking-wide text-green-800 sm:text-sm">
-            В разработка / Очаквайте скоро
-          </span>
-
-          <div className="max-w-3xl">
-            <h1 className="text-4xl font-black tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
-              Планински Радар
-            </h1>
-            <p className="mt-4 text-xl font-medium text-sky-900 sm:text-2xl">
-              Твоят дигитален пазител за безопасност в планината.
-            </p>
-            <p className="mt-5 text-base leading-7 text-slate-700 sm:text-lg">
-              Създаваме динамична топографска карта, която комбинира сигнали от
-              общността за реални рискове по маршрутите с официални данни от
-              планинските служби. На едно място ще виждаш и актуални бюлетини,
-              и живи уебкамери за по-уверени решения преди и по време на преход.
-            </p>
-          </div>
-
-          <div className="mt-8 flex flex-wrap gap-3">
-            <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800 sm:text-sm">
-              Официални сигнали
-            </span>
-            <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-800 sm:text-sm">
-              Общностни доклади
-            </span>
-            <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-800 sm:text-sm">
-              Рискови зони и инциденти
-            </span>
-          </div>
-        </section>
-
-        <section className="rounded-3xl border border-blue-100 bg-white p-6 shadow-lg shadow-blue-100/60 sm:p-8">
-          <div className="max-w-3xl">
-            <h2 className="text-2xl font-bold text-slate-950 sm:text-3xl">
-              Бъди сред първите, които ще тестват приложението.
-            </h2>
-            <p className="mt-2 text-slate-600">
-              Запиши се за ранна бета и получавай първи достъп до новите
-              функционалности.
-            </p>
-          </div>
-
-          <form
-            onSubmit={handleSubmit}
-            className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center"
-          >
-            <label htmlFor="email" className="sr-only">
-              Твоят имейл адрес
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="Твоят имейл адрес"
-              className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-base text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 sm:flex-1"
-            />
-            <button
-              type="submit"
-              className="inline-flex h-12 min-w-36 items-center justify-center rounded-xl bg-gradient-to-r from-green-600 to-blue-600 px-6 text-base font-semibold text-white transition hover:from-green-700 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2"
-            >
-              Запиши се
-            </button>
-          </form>
-        </section>
-
-        <section aria-labelledby="map-heading" className="space-y-4">
-          <div className="max-w-2xl">
-            <h2
-              id="map-heading"
-              className="text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl"
-            >
-              Интерактивна карта
-            </h2>
-            <p className="mt-2 text-slate-600">
-              Виж активни сигнали и хижи върху интерактивна карта в реално време.
-            </p>
-          </div>
-          <div className="h-[500px] w-full overflow-hidden rounded-2xl shadow-2xl z-0">
-            <InteractiveMap activeFilter="all" locateTrigger={0} />
-          </div>
-        </section>
-
-        <section aria-labelledby="features-heading" className="space-y-6">
-          <div className="max-w-2xl">
-            <h2
-              id="features-heading"
-              className="text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl"
-            >
-              Основни възможности
-            </h2>
-            <p className="mt-2 text-slate-600">
-              Всичко важно за условията в планината, подредено ясно и достъпно
-              директно от телефона ти.
-            </p>
-          </div>
-
-          <div className="grid gap-4 sm:gap-5 lg:grid-cols-3">
-            <FeatureCard
-              title="Карта на опасностите"
-              description="Подавай и преглеждай сигнали за лавини, лед, паднали дървета и други рискове, за да планираш по-безопасен маршрут."
-              icon={
-                <svg
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                  className="h-6 w-6"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                >
-                  <path d="M3 7.5 12 3l9 4.5-9 4.5L3 7.5Z" />
-                  <path d="M3 12l9 4.5 9-4.5" />
-                  <path d="M3 16.5 12 21l9-4.5" />
-                </svg>
-              }
-            />
-            <FeatureCard
-              title="Официални бюлетини"
-              description="Автоматично събиране на предупреждения от ПСС и паркови институции за актуална и надеждна картина на ситуацията."
-              icon={
-                <svg
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                  className="h-6 w-6"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                >
-                  <path d="M12 3v18" />
-                  <path d="M5.5 8.5h13l-2 4h-9l-2-4Z" />
-                  <path d="M7 21h10" />
-                </svg>
-              }
-            />
-            <FeatureCard
-              title="Хижи и Уебкамери"
-              description="Провери условията около хижите с последни кадри от уебкамери и допълнителни метео индикатори преди тръгване."
-              icon={
-                <svg
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                  className="h-6 w-6"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                >
-                  <rect x="3.5" y="6" width="17" height="12" rx="2" />
-                  <path d="m9 12 2 2 4-4" />
-                  <path d="M8 3h8" />
-                </svg>
-              }
-            />
-          </div>
-        </section>
-
-        <section className="rounded-3xl border border-green-100 bg-gradient-to-r from-green-50 to-blue-50 p-6 sm:p-8">
-          <h2 className="text-2xl font-bold text-slate-950 sm:text-3xl">
-            Проектът е безплатен и отворен.
-          </h2>
-          <p className="mt-3 max-w-3xl text-slate-700">
-            Планински Радар ще остане безплатен и с отворен код, без реклами и
-            скрити такси. Поддръжката на специализирана инфраструктура за
-            обработка на данни и актуализации в реално време обаче изисква
-            постоянни разходи. Ако искаш да помогнеш за поддръжката, можеш да
-            ме подкрепиш тук:
+    <main className="min-h-screen bg-slate-950 text-white">
+      <div className="mx-auto w-full max-w-md px-4 pb-8 pt-6">
+        <header className="mb-5 rounded-3xl border border-slate-700 bg-slate-900/80 p-4 shadow-xl backdrop-blur-md">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+            Планински Радар
           </p>
-          <a
-            href="https://www.buymeacoffee.com/"
-            target="_blank"
-            rel="noreferrer noopener"
-            className="mt-6 inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              className="h-5 w-5 text-amber-600"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
+          <h1 className="mt-1 text-xl font-bold">{greeting}</h1>
+          <p className="mt-1 text-sm text-slate-300">
+            Мобилен център за сигнали, официални бюлетини и условия в планината.
+          </p>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <Link
+              href="/map"
+              className="flex h-11 items-center justify-center rounded-xl bg-blue-600 text-sm font-semibold text-white transition hover:bg-blue-500"
             >
-              <path d="M7 5h9v9a4 4 0 0 1-4 4h-1a4 4 0 0 1-4-4V5Z" />
-              <path d="M16 8h2a2 2 0 1 1 0 4h-2" />
-              <path d="M6 21h12" />
-            </svg>
-            Подкрепи развитието
-          </a>
-        </section>
-      </main>
+              Отвори карта
+            </Link>
+            <Link
+              href="/auth?callbackUrl=/map"
+              className="flex h-11 items-center justify-center rounded-xl border border-slate-600 bg-slate-800 text-sm font-semibold text-slate-200 transition hover:bg-slate-700"
+            >
+              Вход / Профил
+            </Link>
+          </div>
+        </header>
 
-      <footer className="border-t border-slate-200 bg-white/80 px-4 py-5 text-center text-sm text-slate-600 sm:px-6">
-        © {new Date().getFullYear()} Планински Радар
-      </footer>
-    </div>
+        <section className="mb-5 grid grid-cols-2 gap-2">
+          <article className="rounded-2xl border border-slate-700 bg-slate-900/75 p-3">
+            <p className="text-[11px] text-slate-400">Активни опасности</p>
+            <p className="mt-1 text-lg font-bold text-red-300">{activeHazards}</p>
+          </article>
+          <article className="rounded-2xl border border-slate-700 bg-slate-900/75 p-3">
+            <p className="text-[11px] text-slate-400">Официални сигнали</p>
+            <p className="mt-1 text-lg font-bold text-blue-300">{activeOfficialAlerts}</p>
+          </article>
+          <article className="col-span-2 rounded-2xl border border-slate-700 bg-slate-900/75 p-3">
+            <p className="text-[11px] text-slate-400">Последен webcam cache</p>
+            <p className="mt-1 text-sm font-semibold text-slate-200">
+              {latestSnapshotAt
+                ? new Date(latestSnapshotAt).toLocaleString("bg-BG")
+                : "Все още няма кеширани кадри"}
+            </p>
+          </article>
+        </section>
+
+        <section className="rounded-3xl border border-slate-700 bg-slate-900/80 p-4 shadow-xl backdrop-blur-md">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-bold">Последни сигнали</h2>
+            <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300">
+              Общо: {feedCount}
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            {feed.length === 0 ? (
+              <p className="text-xs text-slate-400">
+                Няма налични записи. Провери отново след няколко минути.
+              </p>
+            ) : (
+              feed.map((item) => (
+                <article
+                  key={`${item.item_type}-${item.id}`}
+                  className="rounded-xl border border-slate-700 bg-slate-800/80 p-2.5"
+                >
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        item.item_type === "hazard"
+                          ? "bg-red-500/20 text-red-200"
+                          : "bg-blue-500/20 text-blue-200"
+                      }`}
+                    >
+                      {item.item_type === "hazard" ? "Потребителски" : "Официален"}
+                    </span>
+                    <time className="text-[10px] text-slate-400">
+                      {new Date(item.created_at).toLocaleString("bg-BG")}
+                    </time>
+                  </div>
+                  <p className="text-xs font-semibold text-white">{item.title}</p>
+                  <p className="mt-1 line-clamp-2 text-xs text-slate-300">{item.description}</p>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    {item.item_type === "hazard"
+                      ? `Подадено от: ${item.author_name || "Анонимен"}`
+                      : `Източник: ${item.source || "Официален канал"}`}
+                  </p>
+                </article>
+              ))
+            )}
+          </div>
+        </section>
+      </div>
+    </main>
   );
 }

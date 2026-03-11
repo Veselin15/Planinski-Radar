@@ -3,7 +3,17 @@
 import dynamic from "next/dynamic";
 import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+
+type FeedItem = {
+  item_type: "hazard" | "official_alert";
+  id: number;
+  title: string;
+  description: string;
+  source?: string;
+  author_name?: string;
+  created_at: string;
+};
 
 const InteractiveMap = dynamic(() => import("../../components/InteractiveMap"), {
   ssr: false,
@@ -26,6 +36,8 @@ export default function MapPage() {
   const [description, setDescription] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
+  const [isFeedOpen, setIsFeedOpen] = useState(false);
 
   const toggleAddingMode = () => {
     // Toggle add mode and clear any selected point when turning it off.
@@ -59,9 +71,46 @@ export default function MapPage() {
     setLocateTrigger((previous) => previous + 1);
   };
 
+  useEffect(() => {
+    const abortController = new AbortController();
+
+    const fetchFeed = async () => {
+      try {
+        // Load a short feed window for the map-side bottom sheet.
+        const response = await fetch("http://localhost:8000/api/feed/?page_size=10", {
+          signal: abortController.signal,
+        });
+        if (!response.ok) {
+          throw new Error("Failed to load feed.");
+        }
+        const data = (await response.json()) as { results?: FeedItem[] };
+        setFeedItems(data.results ?? []);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.error("Error while loading feed:", error);
+        }
+      }
+    };
+
+    fetchFeed();
+    const intervalId = window.setInterval(fetchFeed, 60000);
+
+    return () => {
+      abortController.abort();
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
   const handleSubmitHazard = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selectedLocation || isSubmitting) {
+      return;
+    }
+
+    const normalizedDescription = description.trim();
+    if (!normalizedDescription) {
+      // Block empty reports early to avoid backend validation errors.
+      alert("Моля, добавете описание на опасността.");
       return;
     }
 
@@ -84,7 +133,7 @@ export default function MapPage() {
       // Build multipart payload so text fields and image upload can be sent together.
       const formData = new FormData();
       formData.append("category", selectedCategory);
-      formData.append("description", description);
+      formData.append("description", normalizedDescription);
       formData.append("is_active", "true");
       formData.append("author_name", session.user?.name || "Anonymous");
       formData.append(
@@ -108,7 +157,8 @@ export default function MapPage() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to submit hazard report.");
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to submit hazard report.");
       }
 
       // Reset interaction state and refresh markers after successful submission.
@@ -119,6 +169,7 @@ export default function MapPage() {
     } catch (error) {
       // Log failures so we can add user-facing toasts in a later iteration.
       console.error("Error while submitting hazard:", error);
+      alert("Неуспешно изпращане на сигнал. Моля, опитайте отново.");
     } finally {
       setIsSubmitting(false);
     }
@@ -243,6 +294,55 @@ export default function MapPage() {
         {isAddingMode ? "✕" : "⚠️"}
       </button>
 
+      {/* Show a mobile-first live feed toggle and bottom sheet above the map. */}
+      <button
+        type="button"
+        onClick={() => setIsFeedOpen((previous) => !previous)}
+        className="pointer-events-auto absolute bottom-8 left-6 z-10 rounded-full border border-slate-700 bg-slate-900/90 px-4 py-2 text-xs font-semibold text-white shadow-xl backdrop-blur-md"
+      >
+        {isFeedOpen ? "Скрий сигнали" : "Последни сигнали"}
+      </button>
+
+      {isFeedOpen && (
+        <section className="pointer-events-auto absolute bottom-24 left-4 right-4 z-20 max-h-72 overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900/95 p-3 shadow-2xl backdrop-blur-md">
+          <h3 className="mb-2 text-sm font-semibold text-white">Последни сигнали</h3>
+          <div className="space-y-2">
+            {feedItems.length === 0 ? (
+              <p className="text-xs text-slate-300">Няма налични сигнали в момента.</p>
+            ) : (
+              feedItems.map((item) => (
+                <article
+                  key={`${item.item_type}-${item.id}`}
+                  className="rounded-xl border border-slate-700 bg-slate-800/80 p-2.5"
+                >
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        item.item_type === "hazard"
+                          ? "bg-red-500/20 text-red-200"
+                          : "bg-blue-500/20 text-blue-200"
+                      }`}
+                    >
+                      {item.item_type === "hazard" ? "Потребителски" : "Официален"}
+                    </span>
+                    <time className="text-[10px] text-slate-400">
+                      {new Date(item.created_at).toLocaleString("bg-BG")}
+                    </time>
+                  </div>
+                  <p className="text-xs font-semibold text-white">{item.title}</p>
+                  <p className="mt-1 line-clamp-2 text-xs text-slate-300">{item.description}</p>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    {item.item_type === "hazard"
+                      ? `Подадено от: ${item.author_name || "Анонимен"}`
+                      : `Източник: ${item.source || "Официален канал"}`}
+                  </p>
+                </article>
+              ))
+            )}
+          </div>
+        </section>
+      )}
+
       {selectedLocation && (
         <section className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl border-t border-slate-700 bg-slate-900/95 p-6 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl">
           {/* Use a compact bottom sheet to capture hazard details after point pick. */}
@@ -279,6 +379,7 @@ export default function MapPage() {
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
                 placeholder="Опишете опасността..."
+                required
                 rows={4}
                 className="w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
               />

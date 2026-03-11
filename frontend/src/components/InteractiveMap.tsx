@@ -34,12 +34,30 @@ type HutProperties = {
   elevation?: number | null;
 };
 
+type WebcamSnapshot = {
+  id: number;
+  hut: number;
+  hut_name?: string;
+  source_url?: string | null;
+  image?: string | null;
+  status: "success" | "failed";
+  error_message?: string | null;
+  fetched_at: string;
+};
+
 type HazardProperties = {
   category?: string;
   description?: string;
   image?: string | null;
   upvotes?: number;
   author_name?: string;
+};
+
+type OfficialAlertProperties = {
+  source?: string;
+  title?: string;
+  description?: string;
+  source_url?: string | null;
 };
 
 // Use a custom HTML icon to visually distinguish hut points.
@@ -55,6 +73,15 @@ const hutIcon = L.divIcon({
 const hazardIcon = L.divIcon({
   className: "bg-transparent border-none",
   html: '<div class="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-red-500 text-sm shadow-lg">⚠️</div>',
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+  popupAnchor: [0, -16],
+});
+
+// Use a custom HTML icon to visually distinguish official alerts.
+const officialAlertIcon = L.divIcon({
+  className: "bg-transparent border-none",
+  html: '<div class="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-blue-600 text-sm shadow-lg">📢</div>',
   iconSize: [32, 32],
   iconAnchor: [16, 16],
   popupAnchor: [0, -16],
@@ -148,6 +175,12 @@ export default function InteractiveMap({
 }: InteractiveMapProps) {
   const [huts, setHuts] = useState<GeoFeature<HutProperties>[]>([]);
   const [hazards, setHazards] = useState<GeoFeature<HazardProperties>[]>([]);
+  const [officialAlerts, setOfficialAlerts] = useState<GeoFeature<OfficialAlertProperties>[]>(
+    [],
+  );
+  const [latestSnapshotsByHut, setLatestSnapshotsByHut] = useState<Record<number, WebcamSnapshot>>(
+    {},
+  );
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
@@ -160,17 +193,29 @@ export default function InteractiveMap({
 
     const fetchGeoJsonData = async () => {
       try {
-        // Fetch huts and hazards in parallel for faster initial render.
-        const [hutsResponse, hazardsResponse] = await Promise.all([
+        // Fetch map layers and webcam cache in parallel for faster initial render.
+        const [hutsResponse, hazardsResponse, officialAlertsResponse, webcamSnapshotsResponse] =
+          await Promise.all([
           fetch("http://localhost:8000/api/huts/", {
             signal: abortController.signal,
           }),
           fetch("http://localhost:8000/api/hazards/", {
             signal: abortController.signal,
           }),
+          fetch("http://localhost:8000/api/official-alerts/", {
+            signal: abortController.signal,
+          }),
+          fetch("http://localhost:8000/api/webcam-snapshots/", {
+            signal: abortController.signal,
+          }),
         ]);
 
-        if (!hutsResponse.ok || !hazardsResponse.ok) {
+        if (
+          !hutsResponse.ok ||
+          !hazardsResponse.ok ||
+          !officialAlertsResponse.ok ||
+          !webcamSnapshotsResponse.ok
+        ) {
           throw new Error("Failed to fetch map layers.");
         }
 
@@ -178,9 +223,34 @@ export default function InteractiveMap({
           (await hutsResponse.json()) as GeoFeatureCollection<HutProperties>;
         const hazardsData =
           (await hazardsResponse.json()) as GeoFeatureCollection<HazardProperties>;
+        const officialAlertsData =
+          (await officialAlertsResponse.json()) as GeoFeatureCollection<OfficialAlertProperties>;
+        const webcamSnapshotsPayload = (await webcamSnapshotsResponse.json()) as
+          | WebcamSnapshot[]
+          | { results?: WebcamSnapshot[] };
+        const webcamSnapshotsData = Array.isArray(webcamSnapshotsPayload)
+          ? webcamSnapshotsPayload
+          : webcamSnapshotsPayload.results ?? [];
 
         setHuts(hutsData.features ?? []);
         setHazards(hazardsData.features ?? []);
+        setOfficialAlerts(officialAlertsData.features ?? []);
+
+        // Keep only the newest successful snapshot per hut for popup rendering.
+        const nextLatestSnapshotsByHut = webcamSnapshotsData.reduce<Record<number, WebcamSnapshot>>(
+          (accumulator, snapshot) => {
+            if (snapshot.status !== "success" || !snapshot.image) {
+              return accumulator;
+            }
+            if (accumulator[snapshot.hut]) {
+              return accumulator;
+            }
+            accumulator[snapshot.hut] = snapshot;
+            return accumulator;
+          },
+          {},
+        );
+        setLatestSnapshotsByHut(nextLatestSnapshotsByHut);
       } catch (error) {
         // Ignore abort errors and log only real request failures.
         if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -274,6 +344,26 @@ export default function InteractiveMap({
   };
 
   const center = useMemo<[number, number]>(() => [42.7339, 25.4858], []);
+  const baseMapConfig = useMemo(
+    () => ({
+      // Use BGMountains as the primary map source for Bulgarian trails.
+      url: "https://bgmtile.kade.si/{z}/{x}/{y}.png",
+      maxZoom: 18,
+      attribution:
+        'Map data: &copy; <a href="https://bgmountains.org/" target="_blank" rel="noreferrer">BGMountains</a> | Hosting: <a href="https://kade.si/" target="_blank" rel="noreferrer">kade.si</a>',
+    }),
+    [],
+  );
+
+  const resolveMediaUrl = (mediaUrl?: string | null) => {
+    if (!mediaUrl) {
+      return null;
+    }
+    if (mediaUrl.startsWith("http://") || mediaUrl.startsWith("https://")) {
+      return mediaUrl;
+    }
+    return `http://localhost:8000${mediaUrl}`;
+  };
 
   if (!isMounted) {
     return <div className="h-full w-full bg-slate-100" />;
@@ -284,7 +374,7 @@ export default function InteractiveMap({
       <MapContainer
         center={center}
         zoom={7}
-        maxZoom={17}
+        maxZoom={18}
         className="h-full w-full z-0"
         scrollWheelZoom
       >
@@ -297,15 +387,18 @@ export default function InteractiveMap({
         <UserLocationMarker locateTrigger={locateTrigger} />
 
         <TileLayer
-          // OpenTopoMap serves tiles up to zoom level 17, so cap requests accordingly.
-          maxZoom={17}
-          attribution='Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)'
-          url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
+          key={baseMapConfig.url}
+          maxZoom={baseMapConfig.maxZoom}
+          attribution={baseMapConfig.attribution}
+          url={baseMapConfig.url}
         />
 
         {activeFilter !== "hazards" &&
           huts.map((feature, index) => {
             const [lng, lat] = feature.geometry.coordinates;
+            const hutId = Number(feature.id);
+            const latestSnapshot = Number.isNaN(hutId) ? undefined : latestSnapshotsByHut[hutId];
+            const snapshotImageUrl = resolveMediaUrl(latestSnapshot?.image);
             return (
               <Marker
                 key={`hut-${feature.id ?? index}`}
@@ -321,6 +414,27 @@ export default function InteractiveMap({
                         ? `${feature.properties.elevation} m`
                         : "Няма данни"}
                     </p>
+                    {snapshotImageUrl ? (
+                      <div className="space-y-1 pt-1">
+                        <p className="text-xs font-medium text-slate-700">Последна камера</p>
+                        <img
+                          src={snapshotImageUrl}
+                          alt={`Камера при ${feature.properties.name ?? "хижа"}`}
+                          className="h-32 w-full rounded-md border border-slate-200 object-cover shadow-sm"
+                          loading="lazy"
+                        />
+                        <p className="text-xs text-slate-500">
+                          Обновено:{" "}
+                          {latestSnapshot?.fetched_at
+                            ? new Date(latestSnapshot.fetched_at).toLocaleString("bg-BG")
+                            : "Няма данни"}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="pt-1 text-xs text-slate-500">
+                        Няма налична снимка от камера за тази хижа.
+                      </p>
+                    )}
                   </div>
                 </Popup>
               </Marker>
@@ -368,9 +482,48 @@ export default function InteractiveMap({
               </Marker>
             );
           })}
+
+        {officialAlerts.map((feature, index) => {
+          const [lng, lat] = feature.geometry.coordinates;
+          return (
+            <Marker
+              key={`official-alert-${feature.id ?? index}`}
+              position={[lat, lng]}
+              icon={officialAlertIcon}
+            >
+              <Popup>
+                <div className="space-y-1">
+                  <p className="font-semibold">
+                    {feature.properties.title ?? "Официален бюлетин"}
+                  </p>
+                  <p className="text-sm text-slate-600">
+                    {feature.properties.description ?? "Няма описание."}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Източник: {feature.properties.source ?? "Официален канал"}
+                  </p>
+                  {feature.properties.source_url ? (
+                    <a
+                      href={feature.properties.source_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs font-medium text-blue-600 underline"
+                    >
+                      Виж източника
+                    </a>
+                  ) : null}
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
       </MapContainer>
 
       {/* Render a lightweight overlay legend above the map content. */}
+      <div className="pointer-events-none absolute right-4 top-4 z-[1000] rounded-lg bg-slate-900/85 px-2.5 py-1.5 text-[11px] font-medium text-white shadow-md">
+        Базов слой: BG Mountains
+      </div>
+
       <div className="pointer-events-none absolute bottom-4 left-4 z-[1000] rounded-xl bg-white/80 p-3 shadow-lg backdrop-blur-md">
         <p className="text-sm font-bold text-slate-900">Легенда</p>
         <div className="mt-2 flex items-center gap-2 text-sm text-slate-800">
@@ -380,6 +533,10 @@ export default function InteractiveMap({
         <div className="mt-1 flex items-center gap-2 text-sm text-slate-800">
           <span aria-hidden="true">⚠️</span>
           <span>Опасности</span>
+        </div>
+        <div className="mt-1 flex items-center gap-2 text-sm text-slate-800">
+          <span aria-hidden="true">📢</span>
+          <span>Официални сигнали</span>
         </div>
       </div>
     </div>
