@@ -1,7 +1,7 @@
 from django.contrib.gis.admin import GISModelAdmin
 from django.contrib import admin
 
-from .models import AtesZone, Hazard, HazardVote, Hut, OfficialAlert
+from .models import AtesZone, Hazard, HazardVote, Hut, OfficialAlert, WebcamSnapshot
 
 
 @admin.register(Hazard)
@@ -51,7 +51,7 @@ class HutAdmin(GISModelAdmin):
 @admin.register(OfficialAlert)
 class OfficialAlertAdmin(GISModelAdmin):
     # Surface source, title, and state fields for alert operations.
-    list_display = ("id", "source", "title", "is_active", "created_at")
+    list_display = ("id", "source", "title", "is_active", "published_at", "created_at")
     # Provide filters by source, active state, and creation date.
     list_filter = ("source", "is_active", "created_at")
     # Allow searching alert records by source and text content.
@@ -68,3 +68,15 @@ class AtesZoneAdmin(GISModelAdmin):
     list_filter = ("zone_type",)
     # Support searching descriptive notes for terrain zones.
     search_fields = ("description",)
+
+
+@admin.register(WebcamSnapshot)
+class WebcamSnapshotAdmin(admin.ModelAdmin):
+    # Expose snapshot freshness and status for cache monitoring.
+    list_display = ("id", "hut", "status", "fetched_at")
+    # Filter snapshots by status and recency.
+    list_filter = ("status", "fetched_at")
+    # Support quick lookups by hut name and source URL.
+    search_fields = ("hut__name", "source_url")
+    # Keep latest snapshots first.
+    ordering = ("-fetched_at",)

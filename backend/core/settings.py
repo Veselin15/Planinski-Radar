@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 import os
 from pathlib import Path
+from celery.schedules import crontab
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -147,3 +148,20 @@ CORS_ALLOW_ALL_ORIGINS = True
 # Media file configuration for user-uploaded hazard images.
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# Celery configuration for ingestion and caching jobs.
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/1")
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60
+CELERY_BEAT_SCHEDULE = {
+    "scrape-official-alerts-every-15-min": {
+        "task": "map_data.tasks.scrape_official_alerts",
+        "schedule": crontab(minute="*/15"),
+    },
+    "fetch-webcam-snapshots-every-5-min": {
+        "task": "map_data.tasks.fetch_webcam_snapshots",
+        "schedule": crontab(minute="*/5"),
+    },
+}

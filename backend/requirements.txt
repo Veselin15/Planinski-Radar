@@ -6,3 +6,6 @@ djangorestframework-gis
 django-cors-headers
 google-auth
 requests
+celery
+beautifulsoup4
+redis

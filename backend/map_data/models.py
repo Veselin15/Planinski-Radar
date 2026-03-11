@@ -78,12 +78,39 @@ class OfficialAlert(models.Model):
     title = models.CharField(max_length=255)
     # Full alert body with recommendations and risk context.
     description = models.TextField()
+    # Optional canonical URL pointing to the source alert page.
+    source_url = models.URLField(null=True, blank=True)
+    # Stable hash to deduplicate alerts across repeated scraping cycles.
+    content_hash = models.CharField(max_length=64, null=True, blank=True, db_index=True)
+    # Timestamp from the source system when available.
+    published_at = models.DateTimeField(null=True, blank=True)
     # Optional point location when the alert is geographically specific.
     location = models.PointField(null=True)
     # Flag indicating whether the official alert is currently active.
     is_active = models.BooleanField()
     # Creation timestamp matching the alert ingestion time.
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class WebcamSnapshot(models.Model):
+    class SnapshotStatus(models.TextChoices):
+        # Snapshot was successfully fetched and cached.
+        SUCCESS = "success", "Success"
+        # Snapshot fetch failed and contains diagnostic details.
+        FAILED = "failed", "Failed"
+
+    # Hut for which this frame was fetched.
+    hut = models.ForeignKey(Hut, on_delete=models.CASCADE, related_name="webcam_snapshots")
+    # Source webcam URL used for fetching the snapshot.
+    source_url = models.URLField()
+    # Cached image file saved for fast in-app access.
+    image = models.ImageField(upload_to="webcams/", null=True, blank=True)
+    # Status of the latest fetch attempt.
+    status = models.CharField(max_length=20, choices=SnapshotStatus.choices)
+    # Optional error details for failed fetches.
+    error_message = models.TextField(null=True, blank=True)
+    # Snapshot fetch timestamp for timeline rendering.
+    fetched_at = models.DateTimeField(auto_now_add=True)
 
 
 class AtesZone(models.Model):

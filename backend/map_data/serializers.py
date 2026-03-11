@@ -1,6 +1,7 @@
 from rest_framework_gis.serializers import GeoFeatureModelSerializer
+from rest_framework import serializers
 
-from .models import AtesZone, Hazard, Hut, OfficialAlert
+from .models import AtesZone, Hazard, Hut, OfficialAlert, WebcamSnapshot
 
 
 class HazardSerializer(GeoFeatureModelSerializer):
@@ -48,3 +49,21 @@ class AtesZoneSerializer(GeoFeatureModelSerializer):
         model = AtesZone
         geo_field = "zone_polygon"
         fields = "__all__"
+
+
+class WebcamSnapshotSerializer(serializers.ModelSerializer):
+    # Include hut name for easy rendering in mobile feed cards.
+    hut_name = serializers.CharField(source="hut.name", read_only=True)
+
+    class Meta:
+        model = WebcamSnapshot
+        fields = [
+            "id",
+            "hut",
+            "hut_name",
+            "source_url",
+            "image",
+            "status",
+            "error_message",
+            "fetched_at",
+        ]
