@@ -4,6 +4,12 @@ import dynamic from "next/dynamic";
 import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
+import { useOnlineStatus } from "../../hooks/useOnlineStatus";
+import {
+  addPendingHazardReport,
+  flushPendingHazardReports,
+  getPendingHazardCount,
+} from "../../lib/offlineHazardQueue";
 
 type FeedItem = {
   item_type: "hazard" | "official_alert";
@@ -22,6 +28,7 @@ const InteractiveMap = dynamic(() => import("../../components/InteractiveMap"), 
 export default function MapPage() {
   const { data: session } = useSession();
   const router = useRouter();
+  const isOnline = useOnlineStatus();
   const googleIdToken = session?.googleIdToken;
   const [isAddingMode, setIsAddingMode] = useState(false);
   const [locateTrigger, setLocateTrigger] = useState(0);
@@ -38,6 +45,7 @@ export default function MapPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
   const [isFeedOpen, setIsFeedOpen] = useState(false);
+  const [pendingQueueCount, setPendingQueueCount] = useState(0);
 
   const toggleAddingMode = () => {
     // Toggle add mode and clear any selected point when turning it off.
@@ -70,6 +78,36 @@ export default function MapPage() {
     // Increment a trigger counter so the map can start geolocation on demand.
     setLocateTrigger((previous) => previous + 1);
   };
+
+  useEffect(() => {
+    // Load pending offline reports count for quick visibility.
+    setPendingQueueCount(getPendingHazardCount());
+  }, []);
+
+  useEffect(() => {
+    if (!googleIdToken) {
+      return;
+    }
+
+    const syncQueue = async () => {
+      if (!navigator.onLine) {
+        return;
+      }
+      const result = await flushPendingHazardReports(googleIdToken);
+      setPendingQueueCount(result.remaining);
+      if (result.sent > 0) {
+        alert(`Изпратени офлайн сигнали: ${result.sent}.`);
+        window.location.reload();
+      }
+    };
+
+    void syncQueue();
+    const onOnline = () => void syncQueue();
+    window.addEventListener("online", onOnline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+    };
+  }, [googleIdToken]);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -129,8 +167,7 @@ export default function MapPage() {
 
     setIsSubmitting(true);
 
-    try {
-      // Build multipart payload so text fields and image upload can be sent together.
+    const buildFormData = () => {
       const formData = new FormData();
       formData.append("category", selectedCategory);
       formData.append("description", normalizedDescription);
@@ -146,6 +183,31 @@ export default function MapPage() {
       if (imageFile) {
         formData.append("image", imageFile);
       }
+      return formData;
+    };
+
+    try {
+      if (!navigator.onLine) {
+        addPendingHazardReport({
+          category: selectedCategory,
+          description: normalizedDescription,
+          authorName: session.user?.name || "Anonymous",
+          location: selectedLocation,
+          createdAt: new Date().toISOString(),
+          hadImage: Boolean(imageFile),
+        });
+        const nextQueueCount = getPendingHazardCount();
+        setPendingQueueCount(nextQueueCount);
+        setSelectedLocation(null);
+        setIsAddingMode(false);
+        setImageFile(null);
+        alert(
+          imageFile
+            ? "Нямате интернет. Сигналът е запазен офлайн, но снимката няма да бъде качена."
+            : "Нямате интернет. Сигналът е запазен офлайн и ще бъде изпратен автоматично при връзка.",
+        );
+        return;
+      }
 
       // Let the browser set multipart headers with the correct boundary.
       const response = await fetch("http://localhost:8000/api/hazards/", {
@@ -153,7 +215,7 @@ export default function MapPage() {
         headers: {
           Authorization: `Bearer ${googleIdToken}`,
         },
-        body: formData,
+        body: buildFormData(),
       });
 
       if (!response.ok) {
@@ -167,9 +229,33 @@ export default function MapPage() {
       setImageFile(null);
       window.location.reload();
     } catch (error) {
-      // Log failures so we can add user-facing toasts in a later iteration.
-      console.error("Error while submitting hazard:", error);
-      alert("Неуспешно изпращане на сигнал. Моля, опитайте отново.");
+      // Queue reports when network request fails unexpectedly.
+      const networkError =
+        error instanceof TypeError ||
+        (error instanceof Error && /network|failed to fetch/i.test(error.message));
+      if (networkError) {
+        addPendingHazardReport({
+          category: selectedCategory,
+          description: normalizedDescription,
+          authorName: session.user?.name || "Anonymous",
+          location: selectedLocation,
+          createdAt: new Date().toISOString(),
+          hadImage: Boolean(imageFile),
+        });
+        const nextQueueCount = getPendingHazardCount();
+        setPendingQueueCount(nextQueueCount);
+        setSelectedLocation(null);
+        setIsAddingMode(false);
+        setImageFile(null);
+        alert(
+          imageFile
+            ? "Проблем с мрежата. Сигналът е запазен офлайн, но снимката няма да бъде качена."
+            : "Проблем с мрежата. Сигналът е запазен офлайн и ще бъде изпратен при връзка.",
+        );
+      } else {
+        console.error("Error while submitting hazard:", error);
+        alert("Неуспешно изпращане на сигнал. Моля, опитайте отново.");
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -265,6 +351,22 @@ export default function MapPage() {
           )}
         </div>
       </div>
+
+      {!isOnline ? (
+        <div className="pointer-events-none absolute left-4 right-4 top-20 z-20 flex justify-center">
+          <div className="rounded-full border border-amber-400/50 bg-amber-500/10 px-4 py-2 text-xs font-semibold text-amber-100 shadow-lg backdrop-blur-md">
+            Няма интернет. Показваме кеширана карта и данни.
+          </div>
+        </div>
+      ) : null}
+
+      {pendingQueueCount > 0 ? (
+        <div className="pointer-events-none absolute left-4 right-4 top-32 z-20 flex justify-center">
+          <div className="rounded-full border border-blue-400/40 bg-blue-500/10 px-4 py-2 text-xs font-semibold text-blue-100 shadow-lg backdrop-blur-md">
+            Офлайн опашка: {pendingQueueCount} сигнал(а) чакат изпращане.
+          </div>
+        </div>
+      ) : null}
 
       {isAddingMode && (
         <div className="pointer-events-none absolute top-20 left-4 right-4 z-20 flex justify-center">
