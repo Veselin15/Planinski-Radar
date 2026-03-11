@@ -4,12 +4,8 @@ import dynamic from "next/dynamic";
 import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { useOnlineStatus } from "../../hooks/useOnlineStatus";
-import {
-  addPendingHazardReport,
-  flushPendingHazardReports,
-  getPendingHazardCount,
-} from "../../lib/offlineHazardQueue";
+import { useToast } from "../../components/ToastProvider";
+import { ApiError, apiRequest, getFriendlyErrorMessage } from "../../lib/api";
 
 type FeedItem = {
   item_type: "hazard" | "official_alert";
@@ -21,14 +17,16 @@ type FeedItem = {
   created_at: string;
 };
 
+const FEED_PAGE_SIZE = 6;
+
 const InteractiveMap = dynamic(() => import("../../components/InteractiveMap"), {
   ssr: false,
 });
 
 export default function MapPage() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
-  const isOnline = useOnlineStatus();
+  const { showToast } = useToast();
   const googleIdToken = session?.googleIdToken;
   const [isAddingMode, setIsAddingMode] = useState(false);
   const [locateTrigger, setLocateTrigger] = useState(0);
@@ -44,8 +42,15 @@ export default function MapPage() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
+  const [feedCount, setFeedCount] = useState(0);
+  const [feedPage, setFeedPage] = useState(1);
+  const [canLoadMoreFeed, setCanLoadMoreFeed] = useState(false);
+  const [isLoadingFeed, setIsLoadingFeed] = useState(true);
+  const [isLoadingMap, setIsLoadingMap] = useState(true);
+  const [hasOfficialAlerts, setHasOfficialAlerts] = useState(true);
+  const [hasAnyWebcamSnapshot, setHasAnyWebcamSnapshot] = useState(true);
   const [isFeedOpen, setIsFeedOpen] = useState(false);
-  const [pendingQueueCount, setPendingQueueCount] = useState(0);
+  const [mapRefreshTrigger, setMapRefreshTrigger] = useState(0);
 
   const toggleAddingMode = () => {
     // Toggle add mode and clear any selected point when turning it off.
@@ -61,7 +66,7 @@ export default function MapPage() {
   const handleHazardAction = async () => {
     // Require authentication before entering hazard reporting mode.
     if (!session) {
-      alert("Моля, влезте в профила си, за да подадете сигнал.");
+      showToast("Моля, влезте в профила си, за да подадете сигнал.", "info");
       router.push("/auth?callbackUrl=/map");
       return;
     }
@@ -80,63 +85,62 @@ export default function MapPage() {
   };
 
   useEffect(() => {
-    // Load pending offline reports count for quick visibility.
-    setPendingQueueCount(getPendingHazardCount());
-  }, []);
-
-  useEffect(() => {
-    if (!googleIdToken) {
-      return;
+    // Redirect on session expiration when user is in protected flow.
+    if (status === "unauthenticated" && isAddingMode) {
+      showToast("Сесията е изтекла. Моля, влезте отново.", "error");
+      router.push("/auth?callbackUrl=/map");
+      setIsAddingMode(false);
+      setSelectedLocation(null);
     }
+  }, [status, isAddingMode, router, showToast]);
 
-    const syncQueue = async () => {
-      if (!navigator.onLine) {
-        return;
-      }
-      const result = await flushPendingHazardReports(googleIdToken);
-      setPendingQueueCount(result.remaining);
-      if (result.sent > 0) {
-        alert(`Изпратени офлайн сигнали: ${result.sent}.`);
-        window.location.reload();
-      }
-    };
-
-    void syncQueue();
-    const onOnline = () => void syncQueue();
-    window.addEventListener("online", onOnline);
-    return () => {
-      window.removeEventListener("online", onOnline);
-    };
-  }, [googleIdToken]);
+  const loadFeedPage = async (page: number, append: boolean) => {
+    try {
+      setIsLoadingFeed(true);
+      const data = await apiRequest<{ count?: number; results?: FeedItem[] }>(
+        `/api/feed/?page=${page}&page_size=${FEED_PAGE_SIZE}`,
+      );
+      const nextResults = data.results ?? [];
+      const totalCount = data.count ?? 0;
+      setFeedCount(totalCount);
+      setFeedItems((previous) => (append ? [...previous, ...nextResults] : nextResults));
+      setCanLoadMoreFeed(page * FEED_PAGE_SIZE < totalCount);
+      setFeedPage(page);
+    } catch (error) {
+      showToast(getFriendlyErrorMessage(error), "error");
+    } finally {
+      setIsLoadingFeed(false);
+    }
+  };
 
   useEffect(() => {
-    const abortController = new AbortController();
+    let disposed = false;
+    let timeoutId: number | undefined;
 
-    const fetchFeed = async () => {
-      try {
-        // Load a short feed window for the map-side bottom sheet.
-        const response = await fetch("http://localhost:8000/api/feed/?page_size=10", {
-          signal: abortController.signal,
-        });
-        if (!response.ok) {
-          throw new Error("Failed to load feed.");
-        }
-        const data = (await response.json()) as { results?: FeedItem[] };
-        setFeedItems(data.results ?? []);
-      } catch (error) {
-        if (!(error instanceof DOMException && error.name === "AbortError")) {
-          console.error("Error while loading feed:", error);
-        }
+    const loadWithPolling = async () => {
+      if (!disposed) {
+        await loadFeedPage(1, false);
+      }
+      if (!disposed) {
+        timeoutId = window.setTimeout(() => {
+          if (document.visibilityState === "visible") {
+            void loadWithPolling();
+          } else {
+            timeoutId = window.setTimeout(() => void loadWithPolling(), 20000);
+          }
+        }, 60000);
       }
     };
 
-    fetchFeed();
-    const intervalId = window.setInterval(fetchFeed, 60000);
+    void loadWithPolling();
 
     return () => {
-      abortController.abort();
-      window.clearInterval(intervalId);
+      disposed = true;
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSubmitHazard = async (event: FormEvent<HTMLFormElement>) => {
@@ -147,27 +151,24 @@ export default function MapPage() {
 
     const normalizedDescription = description.trim();
     if (!normalizedDescription) {
-      // Block empty reports early to avoid backend validation errors.
-      alert("Моля, добавете описание на опасността.");
+      showToast("Моля, добавете описание на опасността.", "info");
       return;
     }
 
     if (!session) {
-      // Protect API from anonymous submissions even if the form is somehow open.
-      alert("Моля, влезте в профила си, за да подадете сигнал.");
+      showToast("Моля, влезте в профила си, за да подадете сигнал.", "info");
       router.push("/auth?callbackUrl=/map");
       return;
     }
     if (!googleIdToken) {
-      // Require a valid Google ID token before calling protected backend endpoints.
-      alert("Сесията е изтекла. Моля, влезте отново.");
+      showToast("Сесията е изтекла. Моля, влезте отново.", "error");
       router.push("/auth?callbackUrl=/map");
       return;
     }
 
     setIsSubmitting(true);
 
-    const buildFormData = () => {
+    try {
       const formData = new FormData();
       formData.append("category", selectedCategory);
       formData.append("description", normalizedDescription);
@@ -183,78 +184,26 @@ export default function MapPage() {
       if (imageFile) {
         formData.append("image", imageFile);
       }
-      return formData;
-    };
 
-    try {
-      if (!navigator.onLine) {
-        addPendingHazardReport({
-          category: selectedCategory,
-          description: normalizedDescription,
-          authorName: session.user?.name || "Anonymous",
-          location: selectedLocation,
-          createdAt: new Date().toISOString(),
-          hadImage: Boolean(imageFile),
-        });
-        const nextQueueCount = getPendingHazardCount();
-        setPendingQueueCount(nextQueueCount);
-        setSelectedLocation(null);
-        setIsAddingMode(false);
-        setImageFile(null);
-        alert(
-          imageFile
-            ? "Нямате интернет. Сигналът е запазен офлайн, но снимката няма да бъде качена."
-            : "Нямате интернет. Сигналът е запазен офлайн и ще бъде изпратен автоматично при връзка.",
-        );
-        return;
-      }
-
-      // Let the browser set multipart headers with the correct boundary.
-      const response = await fetch("http://localhost:8000/api/hazards/", {
+      await apiRequest("/api/hazards/", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${googleIdToken}`,
-        },
-        body: buildFormData(),
+        token: googleIdToken,
+        body: formData,
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || "Failed to submit hazard report.");
-      }
 
       // Reset interaction state and refresh markers after successful submission.
       setSelectedLocation(null);
       setIsAddingMode(false);
       setImageFile(null);
-      window.location.reload();
+      setMapRefreshTrigger((previous) => previous + 1);
+      await loadFeedPage(1, false);
+      showToast("Сигналът беше изпратен успешно.", "success");
     } catch (error) {
-      // Queue reports when network request fails unexpectedly.
-      const networkError =
-        error instanceof TypeError ||
-        (error instanceof Error && /network|failed to fetch/i.test(error.message));
-      if (networkError) {
-        addPendingHazardReport({
-          category: selectedCategory,
-          description: normalizedDescription,
-          authorName: session.user?.name || "Anonymous",
-          location: selectedLocation,
-          createdAt: new Date().toISOString(),
-          hadImage: Boolean(imageFile),
-        });
-        const nextQueueCount = getPendingHazardCount();
-        setPendingQueueCount(nextQueueCount);
-        setSelectedLocation(null);
-        setIsAddingMode(false);
-        setImageFile(null);
-        alert(
-          imageFile
-            ? "Проблем с мрежата. Сигналът е запазен офлайн, но снимката няма да бъде качена."
-            : "Проблем с мрежата. Сигналът е запазен офлайн и ще бъде изпратен при връзка.",
-        );
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        showToast("Сесията е изтекла. Моля, влезте отново.", "error");
+        router.push("/auth?callbackUrl=/map");
       } else {
-        console.error("Error while submitting hazard:", error);
-        alert("Неуспешно изпращане на сигнал. Моля, опитайте отново.");
+        showToast(getFriendlyErrorMessage(error), "error");
       }
     } finally {
       setIsSubmitting(false);
@@ -272,6 +221,12 @@ export default function MapPage() {
           activeFilter={activeFilter}
           authToken={googleIdToken}
           onAuthRequired={() => router.push("/auth?callbackUrl=/map")}
+          refreshTrigger={mapRefreshTrigger}
+          onLoadingChange={setIsLoadingMap}
+          onDataSummaryChange={({ officialAlertsCount, successfulSnapshotsCount }) => {
+            setHasOfficialAlerts(officialAlertsCount > 0);
+            setHasAnyWebcamSnapshot(successfulSnapshotsCount > 0);
+          }}
         />
       </div>
 
@@ -344,6 +299,7 @@ export default function MapPage() {
             <button
               type="button"
               onClick={() => router.push("/auth?callbackUrl=/map")}
+              data-testid="login-button"
               className="rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-blue-500"
             >
               Вход с Google
@@ -352,19 +308,21 @@ export default function MapPage() {
         </div>
       </div>
 
-      {!isOnline ? (
-        <div className="pointer-events-none absolute left-4 right-4 top-20 z-20 flex justify-center">
-          <div className="rounded-full border border-amber-400/50 bg-amber-500/10 px-4 py-2 text-xs font-semibold text-amber-100 shadow-lg backdrop-blur-md">
-            Няма интернет. Показваме кеширана карта и данни.
-          </div>
+      {isLoadingMap ? (
+        <div className="pointer-events-none absolute inset-x-4 top-20 z-20 rounded-2xl border border-slate-700 bg-slate-900/85 p-3 text-center text-xs font-medium text-slate-200 shadow-xl backdrop-blur-md">
+          Зареждаме картата и слоевете...
         </div>
       ) : null}
 
-      {pendingQueueCount > 0 ? (
-        <div className="pointer-events-none absolute left-4 right-4 top-32 z-20 flex justify-center">
-          <div className="rounded-full border border-blue-400/40 bg-blue-500/10 px-4 py-2 text-xs font-semibold text-blue-100 shadow-lg backdrop-blur-md">
-            Офлайн опашка: {pendingQueueCount} сигнал(а) чакат изпращане.
-          </div>
+      {!hasOfficialAlerts ? (
+        <div className="pointer-events-none absolute inset-x-4 top-32 z-20 rounded-2xl border border-blue-400/30 bg-blue-500/10 p-3 text-center text-xs font-medium text-blue-100 shadow-xl backdrop-blur-md">
+          В момента няма активни официални сигнали.
+        </div>
+      ) : null}
+
+      {!hasAnyWebcamSnapshot ? (
+        <div className="pointer-events-none absolute inset-x-4 top-44 z-20 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-3 text-center text-xs font-medium text-emerald-100 shadow-xl backdrop-blur-md">
+          В момента няма налични кадри от камери.
         </div>
       ) : null}
 
@@ -390,6 +348,7 @@ export default function MapPage() {
       <button
         type="button"
         onClick={handleHazardAction}
+        data-testid="add-hazard-fab"
         aria-label="Добави сигнал за опасност"
         className="pointer-events-auto absolute bottom-8 right-6 z-10 flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-3xl text-white shadow-2xl transition-transform hover:bg-red-500 active:scale-95"
       >
@@ -407,9 +366,25 @@ export default function MapPage() {
 
       {isFeedOpen && (
         <section className="pointer-events-auto absolute bottom-24 left-4 right-4 z-20 max-h-72 overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900/95 p-3 shadow-2xl backdrop-blur-md">
-          <h3 className="mb-2 text-sm font-semibold text-white">Последни сигнали</h3>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-white">Последни сигнали</h3>
+            <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">
+              Общо: {feedCount}
+            </span>
+          </div>
           <div className="space-y-2">
-            {feedItems.length === 0 ? (
+            {isLoadingFeed ? (
+              Array.from({ length: 3 }).map((_, index) => (
+                <article
+                  key={`map-feed-skeleton-${index}`}
+                  className="animate-pulse rounded-xl border border-slate-700 bg-slate-800/80 p-2.5"
+                >
+                  <div className="h-3 w-16 rounded bg-slate-700" />
+                  <div className="mt-2 h-3 w-3/4 rounded bg-slate-700" />
+                  <div className="mt-2 h-3 w-full rounded bg-slate-700" />
+                </article>
+              ))
+            ) : feedItems.length === 0 ? (
               <p className="text-xs text-slate-300">Няма налични сигнали в момента.</p>
             ) : (
               feedItems.map((item) => (
@@ -442,6 +417,15 @@ export default function MapPage() {
               ))
             )}
           </div>
+          {!isLoadingFeed && canLoadMoreFeed ? (
+            <button
+              type="button"
+              onClick={() => void loadFeedPage(feedPage + 1, true)}
+              className="mt-3 w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:bg-slate-700"
+            >
+              Зареди още
+            </button>
+          ) : null}
         </section>
       )}
 

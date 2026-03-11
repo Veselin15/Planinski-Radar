@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useEffect, useMemo, useState } from "react";
-import { useOnlineStatus } from "../hooks/useOnlineStatus";
+import { useToast } from "../components/ToastProvider";
+import { apiRequest, getFriendlyErrorMessage } from "../lib/api";
 
 type FeedItem = {
   item_type: "hazard" | "official_alert";
@@ -28,56 +29,88 @@ type HealthResponse = {
   };
 };
 
+const FEED_PAGE_SIZE = 6;
+
 export default function Home() {
   const { data: session } = useSession();
-  const isOnline = useOnlineStatus();
+  const { showToast } = useToast();
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [feedCount, setFeedCount] = useState(0);
+  const [feedPage, setFeedPage] = useState(1);
+  const [canLoadMoreFeed, setCanLoadMoreFeed] = useState(false);
+  const [isLoadingFeed, setIsLoadingFeed] = useState(true);
   const [activeHazards, setActiveHazards] = useState(0);
   const [activeOfficialAlerts, setActiveOfficialAlerts] = useState(0);
   const [latestSnapshotAt, setLatestSnapshotAt] = useState<string | null>(null);
+  const [isLoadingHealth, setIsLoadingHealth] = useState(true);
 
   useEffect(() => {
-    const abortController = new AbortController();
+    let isDisposed = false;
+    let timeoutId: number | undefined;
 
-    const loadDashboardData = async () => {
+    const loadHealthData = async () => {
       try {
-        // Load feed and health snapshots in parallel for fast dashboard render.
-        const [feedResponse, healthResponse] = await Promise.all([
-          fetch("http://localhost:8000/api/feed/?page_size=8", {
-            signal: abortController.signal,
-          }),
-          fetch("http://localhost:8000/api/system/health/", {
-            signal: abortController.signal,
-          }),
-        ]);
-
-        if (!feedResponse.ok || !healthResponse.ok) {
-          throw new Error("Failed to load dashboard data.");
+        const healthData = await apiRequest<HealthResponse>("/api/system/health/");
+        if (!isDisposed) {
+          setActiveHazards(healthData.metrics?.active_hazards ?? 0);
+          setActiveOfficialAlerts(healthData.metrics?.active_official_alerts ?? 0);
+          setLatestSnapshotAt(healthData.metrics?.latest_webcam_snapshot_at ?? null);
+          setIsLoadingHealth(false);
         }
-
-        const feedData = (await feedResponse.json()) as FeedResponse;
-        const healthData = (await healthResponse.json()) as HealthResponse;
-
-        setFeed(feedData.results ?? []);
-        setFeedCount(feedData.count ?? 0);
-        setActiveHazards(healthData.metrics?.active_hazards ?? 0);
-        setActiveOfficialAlerts(healthData.metrics?.active_official_alerts ?? 0);
-        setLatestSnapshotAt(healthData.metrics?.latest_webcam_snapshot_at ?? null);
       } catch (error) {
-        if (!(error instanceof DOMException && error.name === "AbortError")) {
-          console.error("Error while loading home dashboard:", error);
+        if (
+          !isDisposed &&
+          !(error instanceof DOMException && error.name === "AbortError")
+        ) {
+          showToast(getFriendlyErrorMessage(error), "error");
+          setIsLoadingHealth(false);
+        }
+      } finally {
+        if (!isDisposed) {
+          timeoutId = window.setTimeout(() => {
+            if (document.visibilityState === "visible") {
+              void loadHealthData();
+            } else {
+              timeoutId = window.setTimeout(() => void loadHealthData(), 20000);
+            }
+          }, 60000);
         }
       }
     };
 
-    loadDashboardData();
-    const intervalId = window.setInterval(loadDashboardData, 60000);
+    void loadHealthData();
 
     return () => {
-      abortController.abort();
-      window.clearInterval(intervalId);
+      isDisposed = true;
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
     };
+  }, [showToast]);
+
+  const loadFeedPage = async (page: number, append: boolean) => {
+    try {
+      setIsLoadingFeed(true);
+      const feedData = await apiRequest<FeedResponse>(
+        `/api/feed/?page=${page}&page_size=${FEED_PAGE_SIZE}`,
+      );
+      const totalCount = feedData.count ?? 0;
+      setFeedCount(totalCount);
+      setFeed((previousFeed) =>
+        append ? [...previousFeed, ...(feedData.results ?? [])] : feedData.results ?? [],
+      );
+      setCanLoadMoreFeed(page * FEED_PAGE_SIZE < totalCount);
+      setFeedPage(page);
+    } catch (error) {
+      showToast(getFriendlyErrorMessage(error), "error");
+    } finally {
+      setIsLoadingFeed(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadFeedPage(1, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const greeting = useMemo(
@@ -88,12 +121,6 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-950 text-white">
       <div className="mx-auto w-full max-w-md px-4 pb-8 pt-6">
-        {!isOnline ? (
-          <div className="mb-4 rounded-xl border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-200">
-            Няма връзка с интернет. Показваме последно кеширани данни.
-          </div>
-        ) : null}
-
         <header className="mb-5 rounded-3xl border border-slate-700 bg-slate-900/80 p-4 shadow-xl backdrop-blur-md">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
             Планински Радар
@@ -121,11 +148,15 @@ export default function Home() {
         <section className="mb-5 grid grid-cols-2 gap-2">
           <article className="rounded-2xl border border-slate-700 bg-slate-900/75 p-3">
             <p className="text-[11px] text-slate-400">Активни опасности</p>
-            <p className="mt-1 text-lg font-bold text-red-300">{activeHazards}</p>
+            <p className="mt-1 text-lg font-bold text-red-300">
+              {isLoadingHealth ? "..." : activeHazards}
+            </p>
           </article>
           <article className="rounded-2xl border border-slate-700 bg-slate-900/75 p-3">
             <p className="text-[11px] text-slate-400">Официални сигнали</p>
-            <p className="mt-1 text-lg font-bold text-blue-300">{activeOfficialAlerts}</p>
+            <p className="mt-1 text-lg font-bold text-blue-300">
+              {isLoadingHealth ? "..." : activeOfficialAlerts}
+            </p>
           </article>
           <article className="col-span-2 rounded-2xl border border-slate-700 bg-slate-900/75 p-3">
             <p className="text-[11px] text-slate-400">Последен webcam cache</p>
@@ -146,7 +177,18 @@ export default function Home() {
           </div>
 
           <div className="space-y-2">
-            {feed.length === 0 ? (
+            {isLoadingFeed ? (
+              Array.from({ length: 3 }).map((_, index) => (
+                <article
+                  key={`feed-skeleton-${index}`}
+                  className="animate-pulse rounded-xl border border-slate-700 bg-slate-800/80 p-2.5"
+                >
+                  <div className="h-3 w-20 rounded bg-slate-700" />
+                  <div className="mt-2 h-3 w-3/4 rounded bg-slate-700" />
+                  <div className="mt-2 h-3 w-full rounded bg-slate-700" />
+                </article>
+              ))
+            ) : feed.length === 0 ? (
               <p className="text-xs text-slate-400">
                 Няма налични записи. Провери отново след няколко минути.
               </p>
@@ -181,6 +223,15 @@ export default function Home() {
               ))
             )}
           </div>
+          {!isLoadingFeed && canLoadMoreFeed ? (
+            <button
+              type="button"
+              onClick={() => void loadFeedPage(feedPage + 1, true)}
+              className="mt-3 w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:bg-slate-700"
+            >
+              Зареди още
+            </button>
+          ) : null}
         </section>
       </div>
     </main>

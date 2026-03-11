@@ -11,6 +11,8 @@ import {
   TileLayer,
   useMapEvents,
 } from "react-leaflet";
+import { useToast } from "./ToastProvider";
+import { API_BASE_URL, ApiError, apiRequest, getFriendlyErrorMessage } from "../lib/api";
 
 type PointGeometry = {
   type: "Point";
@@ -94,6 +96,12 @@ type InteractiveMapProps = {
   activeFilter: "all" | "huts" | "hazards";
   authToken?: string;
   onAuthRequired?: () => void;
+  refreshTrigger?: number;
+  onLoadingChange?: (isLoading: boolean) => void;
+  onDataSummaryChange?: (summary: {
+    officialAlertsCount: number;
+    successfulSnapshotsCount: number;
+  }) => void;
 };
 
 type MapClickHandlerProps = {
@@ -172,7 +180,11 @@ export default function InteractiveMap({
   activeFilter,
   authToken,
   onAuthRequired,
+  refreshTrigger = 0,
+  onLoadingChange,
+  onDataSummaryChange,
 }: InteractiveMapProps) {
+  const { showToast } = useToast();
   const [huts, setHuts] = useState<GeoFeature<HutProperties>[]>([]);
   const [hazards, setHazards] = useState<GeoFeature<HazardProperties>[]>([]);
   const [officialAlerts, setOfficialAlerts] = useState<GeoFeature<OfficialAlertProperties>[]>(
@@ -192,42 +204,24 @@ export default function InteractiveMap({
     const abortController = new AbortController();
 
     const fetchGeoJsonData = async () => {
+      onLoadingChange?.(true);
       try {
         // Fetch map layers and webcam cache in parallel for faster initial render.
-        const [hutsResponse, hazardsResponse, officialAlertsResponse, webcamSnapshotsResponse] =
+        const [hutsData, hazardsData, officialAlertsData, webcamSnapshotsPayload] =
           await Promise.all([
-          fetch("http://localhost:8000/api/huts/", {
+          apiRequest<GeoFeatureCollection<HutProperties>>("/api/huts/", {
             signal: abortController.signal,
           }),
-          fetch("http://localhost:8000/api/hazards/", {
+          apiRequest<GeoFeatureCollection<HazardProperties>>("/api/hazards/", {
             signal: abortController.signal,
           }),
-          fetch("http://localhost:8000/api/official-alerts/", {
+          apiRequest<GeoFeatureCollection<OfficialAlertProperties>>("/api/official-alerts/", {
             signal: abortController.signal,
           }),
-          fetch("http://localhost:8000/api/webcam-snapshots/", {
+          apiRequest<WebcamSnapshot[] | { results?: WebcamSnapshot[] }>("/api/webcam-snapshots/", {
             signal: abortController.signal,
           }),
         ]);
-
-        if (
-          !hutsResponse.ok ||
-          !hazardsResponse.ok ||
-          !officialAlertsResponse.ok ||
-          !webcamSnapshotsResponse.ok
-        ) {
-          throw new Error("Failed to fetch map layers.");
-        }
-
-        const hutsData =
-          (await hutsResponse.json()) as GeoFeatureCollection<HutProperties>;
-        const hazardsData =
-          (await hazardsResponse.json()) as GeoFeatureCollection<HazardProperties>;
-        const officialAlertsData =
-          (await officialAlertsResponse.json()) as GeoFeatureCollection<OfficialAlertProperties>;
-        const webcamSnapshotsPayload = (await webcamSnapshotsResponse.json()) as
-          | WebcamSnapshot[]
-          | { results?: WebcamSnapshot[] };
         const webcamSnapshotsData = Array.isArray(webcamSnapshotsPayload)
           ? webcamSnapshotsPayload
           : webcamSnapshotsPayload.results ?? [];
@@ -251,11 +245,17 @@ export default function InteractiveMap({
           {},
         );
         setLatestSnapshotsByHut(nextLatestSnapshotsByHut);
+        onDataSummaryChange?.({
+          officialAlertsCount: (officialAlertsData.features ?? []).length,
+          successfulSnapshotsCount: Object.keys(nextLatestSnapshotsByHut).length,
+        });
       } catch (error) {
         // Ignore abort errors and log only real request failures.
         if (!(error instanceof DOMException && error.name === "AbortError")) {
-          console.error("Error while loading map data:", error);
+          showToast(getFriendlyErrorMessage(error), "error");
         }
+      } finally {
+        onLoadingChange?.(false);
       }
     };
 
@@ -264,7 +264,7 @@ export default function InteractiveMap({
     return () => {
       abortController.abort();
     };
-  }, []);
+  }, [onDataSummaryChange, onLoadingChange, refreshTrigger, showToast]);
 
   const handleUpvote = async (hazardId?: string | number) => {
     if (hazardId === undefined || hazardId === null) {
@@ -272,7 +272,7 @@ export default function InteractiveMap({
     }
     if (!authToken) {
       // Force login before allowing trust votes.
-      alert("Моля, влезте в профила си, за да потвърдите опасност.");
+      showToast("Моля, влезте в профила си, за да потвърдите опасност.", "info");
       onAuthRequired?.();
       return;
     }
@@ -293,21 +293,13 @@ export default function InteractiveMap({
     );
 
     try {
-      const response = await fetch(
-        `http://localhost:8000/api/hazards/${hazardId}/upvote/`,
+      const data = await apiRequest<{ upvotes?: number }>(
+        `/api/hazards/${hazardId}/upvote/`,
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${authToken}`,
-          },
+          token: authToken,
         },
       );
-
-      if (!response.ok) {
-        throw new Error("Failed to upvote hazard.");
-      }
-
-      const data = (await response.json()) as { upvotes?: number };
       if (typeof data.upvotes === "number") {
         // Sync local state with backend value in case parallel votes changed the count.
         setHazards((previousHazards) =>
@@ -324,7 +316,14 @@ export default function InteractiveMap({
           ),
         );
       }
+      showToast("Благодарим! Потвърждението е отчетено.", "success");
     } catch (error) {
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        onAuthRequired?.();
+        showToast("Сесията е изтекла. Моля, влезте отново.", "error");
+      } else {
+        showToast(getFriendlyErrorMessage(error), "error");
+      }
       // Revert optimistic update when the request fails.
       setHazards((previousHazards) =>
         previousHazards.map((feature) =>
@@ -339,7 +338,6 @@ export default function InteractiveMap({
             : feature,
         ),
       );
-      console.error("Error while upvoting hazard:", error);
     }
   };
 
@@ -362,7 +360,7 @@ export default function InteractiveMap({
     if (mediaUrl.startsWith("http://") || mediaUrl.startsWith("https://")) {
       return mediaUrl;
     }
-    return `http://localhost:8000${mediaUrl}`;
+    return `${API_BASE_URL}${mediaUrl}`;
   };
 
   if (!isMounted) {
@@ -370,8 +368,9 @@ export default function InteractiveMap({
   }
 
   return (
-    <div className="relative h-full w-full z-0">
+    <div className="relative h-full w-full z-0" data-testid="interactive-map">
       <MapContainer
+        data-testid="leaflet-map"
         center={center}
         zoom={7}
         maxZoom={18}
@@ -472,6 +471,7 @@ export default function InteractiveMap({
                     <button
                       type="button"
                       onClick={() => handleUpvote(feature.id)}
+                      data-testid={`upvote-button-${feature.id ?? index}`}
                       disabled={feature.id === undefined || feature.id === null}
                       className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-blue-300"
                     >
