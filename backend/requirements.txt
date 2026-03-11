@@ -4,3 +4,5 @@ Pillow==11.1.0
 djangorestframework
 djangorestframework-gis
 django-cors-headers
+google-auth
+requests

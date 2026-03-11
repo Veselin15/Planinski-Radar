@@ -1,4 +1,7 @@
 from django.contrib.gis.db import models
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
 
 
 class Hazard(models.Model):
@@ -20,6 +23,14 @@ class Hazard(models.Model):
     image = models.ImageField(upload_to="hazards/", null=True)
     # Community score that increases when users upvote a hazard.
     upvotes = models.IntegerField(default=0)
+    # Authenticated user who created this hazard report.
+    author = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="hazards",
+    )
     # Public display name for the user who submitted the report.
     author_name = models.CharField(max_length=100, default="Anonymous")
     # Soft-delete flag controlling whether hazard is visible in the app.
@@ -28,6 +39,21 @@ class Hazard(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     # Last update timestamp for synchronization and edits.
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class HazardVote(models.Model):
+    # User that confirmed the hazard exists.
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="hazard_votes")
+    # Hazard that received a trust vote.
+    hazard = models.ForeignKey(Hazard, on_delete=models.CASCADE, related_name="votes")
+    # Creation timestamp for vote auditing.
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # Enforce one vote per user for each hazard.
+        constraints = [
+            models.UniqueConstraint(fields=["user", "hazard"], name="unique_hazard_vote")
+        ]
 
 
 class Hut(models.Model):

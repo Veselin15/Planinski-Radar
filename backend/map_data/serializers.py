@@ -16,11 +16,14 @@ class HazardSerializer(GeoFeatureModelSerializer):
             "description",
             "image",
             "upvotes",
+            "author",
             "author_name",
             "is_active",
             "created_at",
             "updated_at",
         ]
+        # Prevent clients from forging trust counters or author metadata.
+        read_only_fields = ["upvotes", "author", "author_name", "created_at", "updated_at"]
 
 
 class HutSerializer(GeoFeatureModelSerializer):

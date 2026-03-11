@@ -1,8 +1,11 @@
+from django.db import transaction
+from django.db.models import F
+from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
-from .models import AtesZone, Hazard, Hut, OfficialAlert
+from .models import AtesZone, Hazard, HazardVote, Hut, OfficialAlert
 from .serializers import (
     AtesZoneSerializer,
     HazardSerializer,
@@ -15,13 +18,36 @@ class HazardViewSet(ModelViewSet):
     # Allow reading and creating active hazards from the map workflow.
     queryset = Hazard.objects.filter(is_active=True)
     serializer_class = HazardSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
-    @action(detail=True, methods=["post"])
+    def perform_create(self, serializer):
+        # Persist both FK author and display author_name from authenticated user.
+        display_name = (
+            self.request.user.get_full_name().strip()
+            or self.request.user.first_name
+            or self.request.user.username
+            or "Anonymous"
+        )
+        serializer.save(author=self.request.user, author_name=display_name)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
     def upvote(self, request, pk=None):
-        # Increment trust signal for this hazard and return fresh count.
+        # Enforce one vote per user and atomically increment the trust score.
         hazard = self.get_object()
-        hazard.upvotes += 1
-        hazard.save(update_fields=["upvotes"])
+
+        with transaction.atomic():
+            vote, created = HazardVote.objects.get_or_create(
+                user=request.user,
+                hazard=hazard,
+            )
+            if created:
+                Hazard.objects.filter(pk=hazard.pk).update(upvotes=F("upvotes") + 1)
+
+        hazard.refresh_from_db(fields=["upvotes"])
+        if not created:
+            return Response(
+                {"upvotes": hazard.upvotes, "detail": "You already upvoted this hazard."}
+            )
         return Response({"upvotes": hazard.upvotes})
 
 

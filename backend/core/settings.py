@@ -45,6 +45,14 @@ INSTALLED_APPS = [
     'map_data',
 ]
 
+REST_FRAMEWORK = {
+    # Accept browser session auth and Google ID token auth for API writes.
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+        "map_data.authentication.GoogleIDTokenAuthentication",
+    ],
+}
+
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',

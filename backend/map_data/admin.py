@@ -1,18 +1,38 @@
 from django.contrib.gis.admin import GISModelAdmin
 from django.contrib import admin
 
-from .models import AtesZone, Hazard, Hut, OfficialAlert
+from .models import AtesZone, Hazard, HazardVote, Hut, OfficialAlert
 
 
 @admin.register(Hazard)
 class HazardAdmin(GISModelAdmin):
     # Display the most relevant moderation and lifecycle fields in list view.
-    list_display = ("id", "category", "upvotes", "is_active", "created_at", "updated_at")
+    list_display = (
+        "id",
+        "category",
+        "author_name",
+        "upvotes",
+        "is_active",
+        "created_at",
+        "updated_at",
+    )
     # Allow fast filtering by hazard type and current status.
     list_filter = ("category", "is_active", "created_at")
     # Enable text search through hazard notes.
     search_fields = ("description",)
     # Keep newest hazard reports at the top by default.
+    ordering = ("-created_at",)
+
+
+@admin.register(HazardVote)
+class HazardVoteAdmin(admin.ModelAdmin):
+    # Surface vote ownership to support abuse investigations in admin.
+    list_display = ("id", "user", "hazard", "created_at")
+    # Support vote filtering by date.
+    list_filter = ("created_at",)
+    # Enable quick search by username and hazard id.
+    search_fields = ("user__username", "hazard__id")
+    # Keep latest votes at the top.
     ordering = ("-created_at",)
 
 
