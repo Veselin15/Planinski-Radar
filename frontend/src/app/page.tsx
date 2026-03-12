@@ -13,6 +13,8 @@ type FeedItem = {
   description: string;
   source?: string;
   author_name?: string;
+  status?: "active" | "resolved_by_author" | "auto_expired" | "flagged_for_review";
+  is_active?: boolean;
   created_at: string;
 };
 
@@ -219,6 +221,18 @@ export default function Home() {
                       ? `Подадено от: ${item.author_name || "Анонимен"}`
                       : `Източник: ${item.source || "Официален канал"}`}
                   </p>
+                  {item.item_type === "hazard" && item.status ? (
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      Статус:{" "}
+                      {item.status === "flagged_for_review"
+                        ? "Под проверка"
+                        : item.status === "resolved_by_author"
+                          ? "Затворен от автора"
+                          : item.status === "auto_expired"
+                            ? "Автоматично архивиран"
+                            : "Активен"}
+                    </p>
+                  ) : null}
                 </article>
               ))
             )}

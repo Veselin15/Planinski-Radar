@@ -53,6 +53,10 @@ type HazardProperties = {
   image?: string | null;
   upvotes?: number;
   author_name?: string;
+  author?: number | null;
+  created_at?: string;
+  status?: "active" | "resolved_by_author" | "auto_expired" | "flagged_for_review";
+  report_count?: number;
 };
 
 type OfficialAlertProperties = {
@@ -102,6 +106,7 @@ type InteractiveMapProps = {
     officialAlertsCount: number;
     successfulSnapshotsCount: number;
   }) => void;
+  onHazardsChanged?: () => void;
 };
 
 type MapClickHandlerProps = {
@@ -183,8 +188,13 @@ export default function InteractiveMap({
   refreshTrigger = 0,
   onLoadingChange,
   onDataSummaryChange,
+  onHazardsChanged,
 }: InteractiveMapProps) {
   const { showToast } = useToast();
+  const hazardTtlHours = Number.parseInt(
+    process.env.NEXT_PUBLIC_HAZARD_TTL_HOURS ?? "48",
+    10,
+  );
   const [huts, setHuts] = useState<GeoFeature<HutProperties>[]>([]);
   const [hazards, setHazards] = useState<GeoFeature<HazardProperties>[]>([]);
   const [officialAlerts, setOfficialAlerts] = useState<GeoFeature<OfficialAlertProperties>[]>(
@@ -341,6 +351,102 @@ export default function InteractiveMap({
     }
   };
 
+  const handleResolveHazard = async (hazardId?: string | number) => {
+    if (hazardId === undefined || hazardId === null) {
+      return;
+    }
+    if (!authToken) {
+      showToast("Моля, влезте в профила си, за да затворите сигнал.", "info");
+      onAuthRequired?.();
+      return;
+    }
+
+    try {
+      await apiRequest<{ is_active: boolean; detail?: string }>(
+        `/api/hazards/${hazardId}/resolve/`,
+        {
+          method: "POST",
+          token: authToken,
+        },
+      );
+      // Hide resolved hazard immediately from active map state.
+      setHazards((previousHazards) =>
+        previousHazards.filter((feature) => feature.id !== hazardId),
+      );
+      onHazardsChanged?.();
+      showToast("Сигналът е маркиран като изчистен.", "success");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onAuthRequired?.();
+        showToast("Сесията е изтекла. Моля, влезте отново.", "error");
+        return;
+      }
+      showToast(getFriendlyErrorMessage(error), "error");
+    }
+  };
+
+  const handleReportHazard = async (
+    hazardId?: string | number,
+    reason: "outdated" | "not_real" | "duplicate" | "other" = "outdated",
+  ) => {
+    if (hazardId === undefined || hazardId === null) {
+      return;
+    }
+    if (!authToken) {
+      showToast("Моля, влезте в профила си, за да докладвате сигнал.", "info");
+      onAuthRequired?.();
+      return;
+    }
+
+    try {
+      const data = await apiRequest<{
+        detail?: string;
+        report_count?: number;
+        status?: string;
+        is_active?: boolean;
+      }>(`/api/hazards/${hazardId}/report/`, {
+        method: "POST",
+        token: authToken,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ reason }),
+      });
+
+      setHazards((previousHazards) =>
+        previousHazards.map((feature) => {
+          if (feature.id !== hazardId) {
+            return feature;
+          }
+          const nextStatus =
+            data.status === "active" ||
+            data.status === "resolved_by_author" ||
+            data.status === "auto_expired" ||
+            data.status === "flagged_for_review"
+              ? data.status
+              : feature.properties.status;
+          return {
+            ...feature,
+            properties: {
+              ...feature.properties,
+              report_count: data.report_count ?? feature.properties.report_count ?? 0,
+              status: nextStatus,
+            },
+          };
+        }),
+      );
+      onHazardsChanged?.();
+      showToast("Докладът е изпратен.", "success");
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        onAuthRequired?.();
+        showToast("Сесията е изтекла. Моля, влезте отново.", "error");
+        return;
+      }
+      showToast(getFriendlyErrorMessage(error), "error");
+    }
+  };
+
   const center = useMemo<[number, number]>(() => [42.7339, 25.4858], []);
   const baseMapConfig = useMemo(
     () => ({
@@ -460,6 +566,21 @@ export default function InteractiveMap({
                     <p className="text-xs text-slate-500">
                       Подадено от: {feature.properties.author_name ?? "Анонимен"}
                     </p>
+                    <p className="text-xs text-slate-500">
+                      Статус:{" "}
+                      {feature.properties.status === "flagged_for_review"
+                        ? "Под проверка"
+                        : feature.properties.status === "resolved_by_author"
+                          ? "Затворен от автора"
+                          : feature.properties.status === "auto_expired"
+                            ? "Автоматично архивиран"
+                            : "Активен"}
+                    </p>
+                    {feature.properties.created_at ? (
+                      <p className="text-[11px] text-slate-500">
+                        Авто архив след ~{hazardTtlHours} часа от подаване
+                      </p>
+                    ) : null}
                     {feature.properties.image ? (
                       <img
                         src={feature.properties.image}
@@ -477,6 +598,25 @@ export default function InteractiveMap({
                     >
                       👍 Потвърди ({feature.properties.upvotes ?? 0})
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => handleResolveHazard(feature.id)}
+                      disabled={feature.id === undefined || feature.id === null}
+                      className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-emerald-300"
+                    >
+                      ✅ Маркирай като изчистено
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleReportHazard(feature.id, "outdated")}
+                      disabled={feature.id === undefined || feature.id === null}
+                      className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:bg-amber-300"
+                    >
+                      🚩 Докладвай
+                    </button>
+                    <p className="text-[11px] text-slate-500">
+                      Доклади: {feature.properties.report_count ?? 0}
+                    </p>
                   </div>
                 </Popup>
               </Marker>

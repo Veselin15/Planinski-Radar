@@ -37,6 +37,9 @@ const extractDetailMessage = (payload: unknown): string | null => {
 
 export const getFriendlyErrorMessage = (error: unknown) => {
   if (error instanceof ApiError) {
+    if (error.status === 429) {
+      return "Твърде много заявки за кратко време. Опитайте след малко.";
+    }
     if (error.status === 401) {
       return "Сесията е изтекла. Моля, влезте отново.";
     }
