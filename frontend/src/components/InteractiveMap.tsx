@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useMemo, useState } from "react";
 import L from "leaflet";
@@ -659,12 +660,7 @@ export default function InteractiveMap({
         })}
       </MapContainer>
 
-      {/* Render a lightweight overlay legend above the map content. */}
-      <div className="pointer-events-none absolute right-4 top-4 z-[1000] rounded-lg bg-slate-900/85 px-2.5 py-1.5 text-[11px] font-medium text-white shadow-md">
-        Базов слой: BG Mountains
-      </div>
-
-      <div className="pointer-events-none absolute bottom-4 left-4 z-[1000] rounded-xl bg-white/80 p-3 shadow-lg backdrop-blur-md">
+      <div className="pointer-events-none absolute bottom-4 right-4 z-[1000] hidden rounded-xl bg-white/85 p-3 shadow-lg backdrop-blur-md md:block">
         <p className="text-sm font-bold text-slate-900">Легенда</p>
         <div className="mt-2 flex items-center gap-2 text-sm text-slate-800">
           <span aria-hidden="true">🏕️</span>
@@ -678,6 +674,7 @@ export default function InteractiveMap({
           <span aria-hidden="true">📢</span>
           <span>Официални сигнали</span>
         </div>
+        <p className="mt-2 text-xs text-slate-600">Базов слой: BG Mountains</p>
       </div>
     </div>
   );

@@ -234,13 +234,13 @@ export default function MapPage() {
       </div>
 
       {/* Render floating map filters as a non-blocking top overlay. */}
-      <div className="pointer-events-none absolute top-4 left-4 right-4 z-10 flex items-start justify-between">
-        <div className="pointer-events-auto rounded-full border border-slate-700 bg-slate-900/80 px-4 py-2 shadow-lg backdrop-blur-md">
-          <div className="flex items-center gap-2">
+      <div className="pointer-events-none absolute top-4 left-4 right-4 z-20 flex items-start justify-between gap-3">
+        <div className="ui-card pointer-events-auto rounded-2xl p-1.5">
+          <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => setActiveFilter("all")}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+              className={`min-h-10 rounded-xl px-3.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 ${
                 activeFilter === "all"
                   ? "bg-blue-600 text-white"
                   : "text-slate-300 hover:text-white"
@@ -251,7 +251,7 @@ export default function MapPage() {
             <button
               type="button"
               onClick={() => setActiveFilter("huts")}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+              className={`min-h-10 rounded-xl px-3.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 ${
                 activeFilter === "huts"
                   ? "bg-blue-600 text-white"
                   : "text-slate-300 hover:text-white"
@@ -262,7 +262,8 @@ export default function MapPage() {
             <button
               type="button"
               onClick={() => setActiveFilter("hazards")}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+              data-testid="filter-hazards-button"
+              className={`min-h-10 rounded-xl px-3.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 ${
                 activeFilter === "hazards"
                   ? "bg-blue-600 text-white"
                   : "text-slate-300 hover:text-white"
@@ -273,10 +274,12 @@ export default function MapPage() {
           </div>
         </div>
 
-        <div className="pointer-events-auto ml-2 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-2 shadow-lg backdrop-blur-md">
+        <div className="ui-card pointer-events-auto rounded-2xl px-3 py-2">
           {session ? (
             <div className="flex items-center gap-2">
               {session.user?.image ? (
+                // Intentionally use native img for external auth avatar URLs.
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={session.user.image}
                   alt="Профилна снимка"
@@ -293,7 +296,7 @@ export default function MapPage() {
               <button
                 type="button"
                 onClick={() => signOut()}
-                className="rounded-full bg-slate-700 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-slate-600"
+                className="ui-btn-neutral min-h-9 rounded-lg px-3 font-medium"
               >
                 Изход
               </button>
@@ -303,7 +306,7 @@ export default function MapPage() {
               type="button"
               onClick={() => router.push("/auth?callbackUrl=/map")}
               data-testid="login-button"
-              className="rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-blue-500"
+              className="ui-btn-primary min-h-10 px-3.5 font-medium"
             >
               Вход с Google
             </button>
@@ -311,23 +314,25 @@ export default function MapPage() {
         </div>
       </div>
 
-      {isLoadingMap ? (
-        <div className="pointer-events-none absolute inset-x-4 top-20 z-20 rounded-2xl border border-slate-700 bg-slate-900/85 p-3 text-center text-xs font-medium text-slate-200 shadow-xl backdrop-blur-md">
-          Зареждаме картата и слоевете...
-        </div>
-      ) : null}
+      <div className="pointer-events-none absolute left-1/2 top-20 z-20 flex w-[min(92vw,34rem)] -translate-x-1/2 flex-col gap-2">
+        {isLoadingMap ? (
+          <div className="ui-card-soft px-4 py-2 text-center text-sm font-medium text-slate-100">
+            Зареждаме картата и слоевете...
+          </div>
+        ) : null}
 
-      {!hasOfficialAlerts ? (
-        <div className="pointer-events-none absolute inset-x-4 top-32 z-20 rounded-2xl border border-blue-400/30 bg-blue-500/10 p-3 text-center text-xs font-medium text-blue-100 shadow-xl backdrop-blur-md">
-          В момента няма активни официални сигнали.
-        </div>
-      ) : null}
+        {!isLoadingMap && !hasOfficialAlerts ? (
+          <div className="ui-card-soft border-blue-400/40 bg-blue-500/15 px-4 py-2 text-center text-sm font-medium text-blue-100">
+            В момента няма активни официални сигнали.
+          </div>
+        ) : null}
 
-      {!hasAnyWebcamSnapshot ? (
-        <div className="pointer-events-none absolute inset-x-4 top-44 z-20 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-3 text-center text-xs font-medium text-emerald-100 shadow-xl backdrop-blur-md">
-          В момента няма налични кадри от камери.
-        </div>
-      ) : null}
+        {!isLoadingMap && !hasAnyWebcamSnapshot ? (
+          <div className="ui-card-soft border-emerald-400/40 bg-emerald-500/15 px-4 py-2 text-center text-sm font-medium text-emerald-100">
+            В момента няма налични кадри от камери.
+          </div>
+        ) : null}
+      </div>
 
       {isAddingMode && (
         <div className="pointer-events-none absolute top-20 left-4 right-4 z-20 flex justify-center">
@@ -342,7 +347,11 @@ export default function MapPage() {
         type="button"
         onClick={handleLocateMe}
         aria-label="Покажи моята локация"
-        className="absolute bottom-28 right-6 z-10 w-12 h-12 bg-white text-slate-800 rounded-full shadow-lg flex items-center justify-center text-xl transition-transform active:scale-95"
+        className="absolute right-6 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-white text-xl text-slate-800 shadow-lg transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70"
+        style={{
+          right: "max(1.5rem, calc(env(safe-area-inset-right) + 1rem))",
+          bottom: "calc(7rem + env(safe-area-inset-bottom))",
+        }}
       >
         🎯
       </button>
@@ -353,7 +362,11 @@ export default function MapPage() {
         onClick={handleHazardAction}
         data-testid="add-hazard-fab"
         aria-label="Добави сигнал за опасност"
-        className="pointer-events-auto absolute bottom-8 right-6 z-10 flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-3xl text-white shadow-2xl transition-transform hover:bg-red-500 active:scale-95"
+        className="pointer-events-auto absolute right-6 z-20 flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-3xl text-white shadow-2xl transition-transform hover:bg-red-500 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/80"
+        style={{
+          right: "max(1.5rem, calc(env(safe-area-inset-right) + 1rem))",
+          bottom: "calc(2rem + env(safe-area-inset-bottom))",
+        }}
       >
         {isAddingMode ? "✕" : "⚠️"}
       </button>
@@ -362,16 +375,27 @@ export default function MapPage() {
       <button
         type="button"
         onClick={() => setIsFeedOpen((previous) => !previous)}
-        className="pointer-events-auto absolute bottom-8 left-6 z-10 rounded-full border border-slate-700 bg-slate-900/90 px-4 py-2 text-xs font-semibold text-white shadow-xl backdrop-blur-md"
+        className="ui-btn-secondary pointer-events-auto absolute left-6 z-20 px-4 shadow-xl backdrop-blur-md"
+        style={{
+          left: "max(1.5rem, calc(env(safe-area-inset-left) + 1rem))",
+          bottom: "calc(2rem + env(safe-area-inset-bottom))",
+        }}
       >
         {isFeedOpen ? "Скрий сигнали" : "Последни сигнали"}
       </button>
 
       {isFeedOpen && (
-        <section className="pointer-events-auto absolute bottom-24 left-4 right-4 z-20 max-h-72 overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900/95 p-3 shadow-2xl backdrop-blur-md">
+        <section
+          className="pointer-events-auto absolute z-30 max-h-[45vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900/95 p-3 shadow-2xl backdrop-blur-md"
+          style={{
+            left: "max(1rem, env(safe-area-inset-left))",
+            right: "max(1rem, env(safe-area-inset-right))",
+            bottom: "calc(6.5rem + env(safe-area-inset-bottom))",
+          }}
+        >
           <div className="mb-2 flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-white">Последни сигнали</h3>
-            <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">
+            <span className="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-300">
               Общо: {feedCount}
             </span>
           </div>
@@ -380,7 +404,7 @@ export default function MapPage() {
               Array.from({ length: 3 }).map((_, index) => (
                 <article
                   key={`map-feed-skeleton-${index}`}
-                  className="animate-pulse rounded-xl border border-slate-700 bg-slate-800/80 p-2.5"
+                  className="ui-card-soft animate-pulse"
                 >
                   <div className="h-3 w-16 rounded bg-slate-700" />
                   <div className="mt-2 h-3 w-3/4 rounded bg-slate-700" />
@@ -393,11 +417,11 @@ export default function MapPage() {
               feedItems.map((item) => (
                 <article
                   key={`${item.item_type}-${item.id}`}
-                  className="rounded-xl border border-slate-700 bg-slate-800/80 p-2.5"
+                  className="ui-card-soft"
                 >
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      className={`ui-chip ${
                         item.item_type === "hazard"
                           ? "bg-red-500/20 text-red-200"
                           : "bg-blue-500/20 text-blue-200"
@@ -405,19 +429,19 @@ export default function MapPage() {
                     >
                       {item.item_type === "hazard" ? "Потребителски" : "Официален"}
                     </span>
-                    <time className="text-[10px] text-slate-400">
+                    <time className="text-xs text-slate-400">
                       {new Date(item.created_at).toLocaleString("bg-BG")}
                     </time>
                   </div>
-                  <p className="text-xs font-semibold text-white">{item.title}</p>
-                  <p className="mt-1 line-clamp-2 text-xs text-slate-300">{item.description}</p>
-                  <p className="mt-1 text-[11px] text-slate-400">
+                  <p className="text-sm font-semibold text-white">{item.title}</p>
+                  <p className="mt-1 line-clamp-2 text-sm text-slate-300">{item.description}</p>
+                  <p className="mt-1 text-xs text-slate-300">
                     {item.item_type === "hazard"
                       ? `Подадено от: ${item.author_name || "Анонимен"}`
                       : `Източник: ${item.source || "Официален канал"}`}
                   </p>
                   {item.item_type === "hazard" && item.status ? (
-                    <p className="mt-1 text-[11px] text-slate-400">
+                    <p className="mt-1 text-xs text-slate-300">
                       Статус:{" "}
                       {item.status === "flagged_for_review"
                         ? "Под проверка"
@@ -436,7 +460,7 @@ export default function MapPage() {
             <button
               type="button"
               onClick={() => void loadFeedPage(feedPage + 1, true)}
-              className="mt-3 w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:bg-slate-700"
+              className="ui-btn-secondary mt-3 w-full"
             >
               Зареди още
             </button>
@@ -445,7 +469,10 @@ export default function MapPage() {
       )}
 
       {selectedLocation && (
-        <section className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl border-t border-slate-700 bg-slate-900/95 p-6 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl">
+        <section
+          className="fixed bottom-0 left-0 right-0 z-50 max-h-[82vh] overflow-y-auto rounded-t-3xl border-t border-slate-700 bg-slate-900/95 px-6 pt-6 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl"
+          style={{ paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))" }}
+        >
           {/* Use a compact bottom sheet to capture hazard details after point pick. */}
           <form className="space-y-4" onSubmit={handleSubmitHazard}>
             <div className="space-y-2">
@@ -459,7 +486,7 @@ export default function MapPage() {
                 id="hazard-category"
                 value={selectedCategory}
                 onChange={(event) => setSelectedCategory(event.target.value)}
-                className="h-11 w-full rounded-xl border border-slate-600 bg-slate-800 px-3 text-sm text-white focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                className="h-11 w-full rounded-xl border border-slate-600 bg-slate-800 px-3 text-sm text-white focus:border-blue-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
               >
                 <option value="avalanche">Лавина</option>
                 <option value="ice">Заледяване</option>
@@ -482,7 +509,7 @@ export default function MapPage() {
                 placeholder="Опишете опасността..."
                 required
                 rows={4}
-                className="w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                className="w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
               />
             </div>
 
@@ -490,13 +517,13 @@ export default function MapPage() {
               type="file"
               accept="image/*"
               onChange={(event) => setImageFile(event.target.files?.[0] || null)}
-              className="w-full text-sm text-slate-400 file:mr-4 file:rounded-full file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
+              className="w-full text-sm text-slate-300 file:mr-4 file:rounded-full file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70"
             />
 
             <button
               type="submit"
               disabled={isSubmitting}
-              className="h-12 w-full rounded-xl bg-blue-600 text-base font-semibold text-white shadow-lg transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-blue-400"
+              className="h-12 w-full rounded-xl bg-blue-600 text-base font-semibold text-white shadow-lg transition hover:bg-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 disabled:cursor-not-allowed disabled:bg-blue-400"
             >
               {isSubmitting ? "Изпращане..." : "Изпрати сигнал"}
             </button>
