@@ -150,7 +150,9 @@ test("smoke: upvote flow", async ({ page }) => {
   await mockMapApis(page);
   await page.goto("/map");
 
-  await page.locator("div:has-text('⚠️')").first().click();
+  await page.getByTestId("filter-hazards-button").click();
+  await page.locator(".leaflet-marker-icon").first().click();
+  await expect(page.getByTestId("upvote-button-1")).toBeVisible();
   await page.getByTestId("upvote-button-1").click();
   await expect(page.getByText("Благодарим! Потвърждението е отчетено.")).toBeVisible();
 });
