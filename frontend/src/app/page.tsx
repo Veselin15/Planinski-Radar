@@ -123,7 +123,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-950 text-white">
       <div className="mx-auto w-full max-w-md px-4 pb-8 pt-6">
-        <header className="mb-5 rounded-3xl border border-slate-700 bg-slate-900/80 p-4 shadow-xl backdrop-blur-md">
+        <header className="ui-card mb-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
             Планински Радар
           </p>
@@ -134,13 +134,13 @@ export default function Home() {
           <div className="mt-4 grid grid-cols-2 gap-2">
             <Link
               href="/map"
-              className="flex h-11 items-center justify-center rounded-xl bg-blue-600 text-sm font-semibold text-white transition hover:bg-blue-500"
+              className="ui-btn-primary"
             >
               Отвори карта
             </Link>
             <Link
               href="/auth?callbackUrl=/map"
-              className="flex h-11 items-center justify-center rounded-xl border border-slate-600 bg-slate-800 text-sm font-semibold text-slate-200 transition hover:bg-slate-700"
+              className="ui-btn-secondary"
             >
               Вход / Профил
             </Link>
@@ -148,20 +148,20 @@ export default function Home() {
         </header>
 
         <section className="mb-5 grid grid-cols-2 gap-2">
-          <article className="rounded-2xl border border-slate-700 bg-slate-900/75 p-3">
-            <p className="text-[11px] text-slate-400">Активни опасности</p>
+          <article className="ui-card-soft">
+            <p className="text-xs text-slate-300">Активни опасности</p>
             <p className="mt-1 text-lg font-bold text-red-300">
               {isLoadingHealth ? "..." : activeHazards}
             </p>
           </article>
-          <article className="rounded-2xl border border-slate-700 bg-slate-900/75 p-3">
-            <p className="text-[11px] text-slate-400">Официални сигнали</p>
+          <article className="ui-card-soft">
+            <p className="text-xs text-slate-300">Официални сигнали</p>
             <p className="mt-1 text-lg font-bold text-blue-300">
               {isLoadingHealth ? "..." : activeOfficialAlerts}
             </p>
           </article>
-          <article className="col-span-2 rounded-2xl border border-slate-700 bg-slate-900/75 p-3">
-            <p className="text-[11px] text-slate-400">Последен webcam cache</p>
+          <article className="ui-card-soft col-span-2">
+            <p className="text-xs text-slate-300">Последно обновяване от камери</p>
             <p className="mt-1 text-sm font-semibold text-slate-200">
               {latestSnapshotAt
                 ? new Date(latestSnapshotAt).toLocaleString("bg-BG")
@@ -170,10 +170,10 @@ export default function Home() {
           </article>
         </section>
 
-        <section className="rounded-3xl border border-slate-700 bg-slate-900/80 p-4 shadow-xl backdrop-blur-md">
+        <section className="ui-card">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-bold">Последни сигнали</h2>
-            <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300">
+            <span className="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-300">
               Общо: {feedCount}
             </span>
           </div>
@@ -183,7 +183,7 @@ export default function Home() {
               Array.from({ length: 3 }).map((_, index) => (
                 <article
                   key={`feed-skeleton-${index}`}
-                  className="animate-pulse rounded-xl border border-slate-700 bg-slate-800/80 p-2.5"
+                  className="ui-card-soft animate-pulse"
                 >
                   <div className="h-3 w-20 rounded bg-slate-700" />
                   <div className="mt-2 h-3 w-3/4 rounded bg-slate-700" />
@@ -198,11 +198,11 @@ export default function Home() {
               feed.map((item) => (
                 <article
                   key={`${item.item_type}-${item.id}`}
-                  className="rounded-xl border border-slate-700 bg-slate-800/80 p-2.5"
+                  className="ui-card-soft"
                 >
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      className={`ui-chip ${
                         item.item_type === "hazard"
                           ? "bg-red-500/20 text-red-200"
                           : "bg-blue-500/20 text-blue-200"
@@ -210,19 +210,19 @@ export default function Home() {
                     >
                       {item.item_type === "hazard" ? "Потребителски" : "Официален"}
                     </span>
-                    <time className="text-[10px] text-slate-400">
+                    <time className="text-xs text-slate-300">
                       {new Date(item.created_at).toLocaleString("bg-BG")}
                     </time>
                   </div>
-                  <p className="text-xs font-semibold text-white">{item.title}</p>
-                  <p className="mt-1 line-clamp-2 text-xs text-slate-300">{item.description}</p>
-                  <p className="mt-1 text-[11px] text-slate-400">
+                  <p className="text-sm font-semibold text-white">{item.title}</p>
+                  <p className="mt-1 line-clamp-2 text-sm text-slate-300">{item.description}</p>
+                  <p className="mt-1 text-xs text-slate-300">
                     {item.item_type === "hazard"
                       ? `Подадено от: ${item.author_name || "Анонимен"}`
                       : `Източник: ${item.source || "Официален канал"}`}
                   </p>
                   {item.item_type === "hazard" && item.status ? (
-                    <p className="mt-1 text-[11px] text-slate-400">
+                    <p className="mt-1 text-xs text-slate-300">
                       Статус:{" "}
                       {item.status === "flagged_for_review"
                         ? "Под проверка"
@@ -241,7 +241,7 @@ export default function Home() {
             <button
               type="button"
               onClick={() => void loadFeedPage(feedPage + 1, true)}
-              className="mt-3 w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:bg-slate-700"
+              className="ui-btn-secondary mt-3 w-full"
             >
               Зареди още
             </button>

@@ -2,9 +2,9 @@
 
 import { signIn, useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 
-export default function AuthPage() {
+function AuthPageContent() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -24,7 +24,7 @@ export default function AuthPage() {
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 px-4 py-10 text-white">
-      <div className="mx-auto w-full max-w-md rounded-3xl border border-slate-700 bg-slate-900/80 p-6 shadow-2xl backdrop-blur-md sm:p-8">
+      <div className="ui-card mx-auto w-full max-w-md p-6 sm:p-8">
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-300">
           Планински Радар
         </p>
@@ -39,7 +39,7 @@ export default function AuthPage() {
           onClick={handleGoogleAuth}
           data-testid="google-signin-button"
           disabled={status === "loading"}
-          className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-blue-400"
+          className="ui-btn-primary mt-6 h-12 w-full gap-2 disabled:cursor-not-allowed disabled:bg-blue-400"
         >
           {status === "loading" ? "Зареждане..." : "Вход с Google"}
         </button>
@@ -47,11 +47,27 @@ export default function AuthPage() {
         <button
           type="button"
           onClick={() => router.push("/map")}
-          className="mt-3 h-11 w-full rounded-xl border border-slate-600 bg-transparent px-4 text-sm font-medium text-slate-200 transition hover:bg-slate-800"
+          className="ui-btn-secondary mt-3 w-full bg-transparent font-medium text-slate-200"
         >
           Назад към картата
         </button>
       </div>
     </main>
+  );
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 px-4 py-10 text-white">
+          <div className="ui-card mx-auto w-full max-w-md p-6 sm:p-8">
+            <p className="text-sm text-slate-300">Зареждане на вход...</p>
+          </div>
+        </main>
+      }
+    >
+      <AuthPageContent />
+    </Suspense>
   );
 }

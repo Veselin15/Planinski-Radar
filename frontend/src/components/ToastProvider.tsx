@@ -42,11 +42,17 @@ export function ToastProvider({ children }: ToastProviderProps) {
   return (
     <ToastContext.Provider value={contextValue}>
       {children}
-      <div className="pointer-events-none fixed left-1/2 top-4 z-[9999] w-[92%] max-w-md -translate-x-1/2 space-y-2">
+      <div
+        className="pointer-events-none fixed left-1/2 top-4 z-[9999] w-[92%] max-w-md -translate-x-1/2 space-y-2"
+        aria-live="polite"
+        aria-atomic="false"
+      >
         {toasts.map((toast) => (
           <div
             key={toast.id}
             className={`rounded-xl border px-3 py-2 text-sm font-medium shadow-xl backdrop-blur-md ${toastTypeClasses[toast.type]}`}
+            role={toast.type === "error" ? "alert" : "status"}
+            aria-live={toast.type === "error" ? "assertive" : "polite"}
           >
             {toast.message}
           </div>
