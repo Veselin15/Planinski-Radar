@@ -1,5 +1,6 @@
 import hashlib
 import os
+from datetime import timedelta
 from datetime import datetime
 from urllib.parse import urljoin
 from xml.etree import ElementTree
@@ -10,7 +11,7 @@ from celery import shared_task
 from django.core.files.base import ContentFile
 from django.utils import timezone
 
-from .models import Hut, OfficialAlert, WebcamSnapshot
+from .models import Hazard, Hut, OfficialAlert, WebcamSnapshot
 
 DEFAULT_HEADERS = {
     # Use a desktop user-agent to avoid simplified anti-bot responses.
@@ -237,3 +238,29 @@ def fetch_webcam_snapshots(self):
             failed_count += 1
 
     return {"created": created_count, "failed": failed_count, "scanned_huts": huts.count()}
+
+
+@shared_task
+def deactivate_stale_hazards():
+    """
+    Deactivate active hazards after configured TTL to keep the live map clean.
+    """
+    ttl_hours_raw = os.getenv("HAZARD_TTL_HOURS", "48")
+    try:
+        ttl_hours = max(int(ttl_hours_raw), 1)
+    except (TypeError, ValueError):
+        ttl_hours = 48
+
+    cutoff_dt = timezone.now() - timedelta(hours=ttl_hours)
+    deactivated_count = Hazard.objects.filter(
+        is_active=True,
+        created_at__lt=cutoff_dt,
+    ).update(
+        is_active=False,
+        status=Hazard.Status.AUTO_EXPIRED,
+    )
+
+    return {
+        "ttl_hours": ttl_hours,
+        "deactivated": deactivated_count,
+    }

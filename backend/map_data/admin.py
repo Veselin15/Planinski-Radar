@@ -1,7 +1,15 @@
 from django.contrib.gis.admin import GISModelAdmin
 from django.contrib import admin
 
-from .models import AtesZone, Hazard, HazardVote, Hut, OfficialAlert, WebcamSnapshot
+from .models import (
+    AtesZone,
+    Hazard,
+    HazardFlag,
+    HazardVote,
+    Hut,
+    OfficialAlert,
+    WebcamSnapshot,
+)
 
 
 @admin.register(Hazard)
@@ -12,16 +20,24 @@ class HazardAdmin(GISModelAdmin):
         "category",
         "author_name",
         "upvotes",
+        "status",
+        "flag_count",
         "is_active",
         "created_at",
         "updated_at",
     )
     # Allow fast filtering by hazard type and current status.
-    list_filter = ("category", "is_active", "created_at")
+    list_filter = ("category", "status", "is_active", "created_at")
     # Enable text search through hazard notes.
     search_fields = ("description",)
     # Keep newest hazard reports at the top by default.
     ordering = ("-created_at",)
+
+    def flag_count(self, obj):
+        # Show how many users flagged this hazard for moderation.
+        return obj.flags.count()
+
+    flag_count.short_description = "Flags"
 
 
 @admin.register(HazardVote)
@@ -33,6 +49,18 @@ class HazardVoteAdmin(admin.ModelAdmin):
     # Enable quick search by username and hazard id.
     search_fields = ("user__username", "hazard__id")
     # Keep latest votes at the top.
+    ordering = ("-created_at",)
+
+
+@admin.register(HazardFlag)
+class HazardFlagAdmin(admin.ModelAdmin):
+    # Surface moderation reports for manual triage.
+    list_display = ("id", "user", "hazard", "reason", "created_at")
+    # Filter by reason and timestamp.
+    list_filter = ("reason", "created_at")
+    # Support quick search by username and hazard id.
+    search_fields = ("user__username", "hazard__id", "hazard__description")
+    # Keep latest reports at the top.
     ordering = ("-created_at",)
 
 

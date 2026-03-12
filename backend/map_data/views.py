@@ -2,14 +2,24 @@ from django.db import transaction
 from django.db.models import F
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
+from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.throttling import UserRateThrottle
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
-from .models import AtesZone, Hazard, HazardVote, Hut, OfficialAlert, WebcamSnapshot
+from .models import (
+    AtesZone,
+    Hazard,
+    HazardFlag,
+    HazardVote,
+    Hut,
+    OfficialAlert,
+    WebcamSnapshot,
+)
 from .serializers import (
     AtesZoneSerializer,
     HazardSerializer,
@@ -19,11 +29,45 @@ from .serializers import (
 )
 
 
+class HazardReportThrottle(UserRateThrottle):
+    # Limit how often a single user can submit new hazard reports.
+    scope = "hazard_report"
+
+
+class HazardUpvoteThrottle(UserRateThrottle):
+    # Limit voting burst traffic from a single user.
+    scope = "hazard_upvote"
+
+
+class HazardResolveThrottle(UserRateThrottle):
+    # Limit repeated resolve actions in a short period.
+    scope = "hazard_resolve"
+
+
+class HazardFlagThrottle(UserRateThrottle):
+    # Limit how often users can report hazard quality issues.
+    scope = "hazard_flag"
+
+
 class HazardViewSet(ModelViewSet):
     # Allow reading and creating active hazards from the map workflow.
     queryset = Hazard.objects.filter(is_active=True)
     serializer_class = HazardSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_throttles(self):
+        # Apply throttling only to write-heavy actions.
+        if self.action == "create":
+            throttle_classes = [HazardReportThrottle]
+        elif self.action == "upvote":
+            throttle_classes = [HazardUpvoteThrottle]
+        elif self.action == "resolve":
+            throttle_classes = [HazardResolveThrottle]
+        elif self.action == "report":
+            throttle_classes = [HazardFlagThrottle]
+        else:
+            throttle_classes = []
+        return [throttle() for throttle in throttle_classes]
 
     def perform_create(self, serializer):
         # Persist both FK author and display author_name from authenticated user.
@@ -54,6 +98,67 @@ class HazardViewSet(ModelViewSet):
                 {"upvotes": hazard.upvotes, "detail": "You already upvoted this hazard."}
             )
         return Response({"upvotes": hazard.upvotes})
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def report(self, request, pk=None):
+        # Allow users to flag signals that look invalid or outdated.
+        hazard = self.get_object()
+        reason = request.data.get("reason", "outdated")
+        allowed_reasons = {"outdated", "not_real", "duplicate", "other"}
+        if reason not in allowed_reasons:
+            reason = "other"
+
+        flag, created = HazardFlag.objects.get_or_create(
+            user=request.user,
+            hazard=hazard,
+            defaults={"reason": reason},
+        )
+        if not created and flag.reason != reason:
+            flag.reason = reason
+            flag.save(update_fields=["reason"])
+
+        report_count = hazard.flags.count()
+        if report_count >= 3 and hazard.is_active:
+            hazard.status = Hazard.Status.FLAGGED_FOR_REVIEW
+            hazard.is_active = False
+            hazard.save(update_fields=["status", "is_active", "updated_at"])
+
+        detail = "Report submitted."
+        if not created:
+            detail = "You already reported this hazard."
+        return Response(
+            {
+                "detail": detail,
+                "report_count": report_count,
+                "status": hazard.status,
+                "is_active": hazard.is_active,
+            }
+        )
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def resolve(self, request, pk=None):
+        # Allow the original author (or staff) to mark hazard as no longer active.
+        hazard = self.get_object()
+
+        if not (hazard.author_id == request.user.id or request.user.is_staff):
+            return Response(
+                {"detail": "Only the hazard author can resolve this signal."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not hazard.is_active:
+            return Response({"is_active": False, "detail": "Hazard is already resolved."})
+
+        hazard.is_active = False
+        hazard.status = Hazard.Status.RESOLVED_BY_AUTHOR
+        hazard.save(update_fields=["is_active", "status", "updated_at"])
+        return Response(
+            {
+                "is_active": False,
+                "status": hazard.status,
+                "detail": "Hazard has been resolved.",
+            }
+        )
 
 
 class HutViewSet(ReadOnlyModelViewSet):
@@ -102,7 +207,7 @@ class FeedView(APIView):
         feed_items = []
 
         if feed_type in {"all", "hazards"}:
-            hazards = Hazard.objects.filter(is_active=True).order_by("-created_at")
+            hazards = Hazard.objects.order_by("-created_at")
             if since_dt:
                 hazards = hazards.filter(created_at__gte=since_dt)
             for hazard in hazards:
@@ -114,6 +219,8 @@ class FeedView(APIView):
                         "description": hazard.description,
                         "author_name": hazard.author_name,
                         "upvotes": hazard.upvotes,
+                        "status": hazard.status,
+                        "is_active": hazard.is_active,
                         "image": hazard.image.url if hazard.image else None,
                         "coordinates": [hazard.location.x, hazard.location.y],
                         "created_at": hazard.created_at,

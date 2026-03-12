@@ -52,6 +52,13 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.SessionAuthentication",
         "map_data.authentication.GoogleIDTokenAuthentication",
     ],
+    # Throttle rates for report/vote/resolve actions in map workflows.
+    "DEFAULT_THROTTLE_RATES": {
+        "hazard_report": "10/hour",
+        "hazard_upvote": "120/hour",
+        "hazard_resolve": "30/hour",
+        "hazard_flag": "60/hour",
+    },
 }
 
 MIDDLEWARE = [
@@ -163,5 +170,9 @@ CELERY_BEAT_SCHEDULE = {
     "fetch-webcam-snapshots-every-5-min": {
         "task": "map_data.tasks.fetch_webcam_snapshots",
         "schedule": crontab(minute="*/5"),
+    },
+    "deactivate-stale-hazards-hourly": {
+        "task": "map_data.tasks.deactivate_stale_hazards",
+        "schedule": crontab(minute=0),
     },
 }

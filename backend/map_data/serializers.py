@@ -5,6 +5,15 @@ from .models import AtesZone, Hazard, Hut, OfficialAlert, WebcamSnapshot
 
 
 class HazardSerializer(GeoFeatureModelSerializer):
+    # Surface moderation report count for map and feed transparency.
+    report_count = serializers.SerializerMethodField()
+
+    def get_report_count(self, obj):
+        # Use prefetched relation cache when available, otherwise count query.
+        if hasattr(obj, "_prefetched_objects_cache") and "flags" in obj._prefetched_objects_cache:
+            return len(obj._prefetched_objects_cache["flags"])
+        return obj.flags.count()
+
     # Serialize hazard points as GeoJSON features.
     class Meta:
         model = Hazard
@@ -20,6 +29,8 @@ class HazardSerializer(GeoFeatureModelSerializer):
             "author",
             "author_name",
             "is_active",
+            "status",
+            "report_count",
             "created_at",
             "updated_at",
         ]

@@ -5,6 +5,16 @@ User = get_user_model()
 
 
 class Hazard(models.Model):
+    class Status(models.TextChoices):
+        # Signal is active and visible on the map.
+        ACTIVE = "active", "Active"
+        # Signal was resolved by its original author.
+        RESOLVED_BY_AUTHOR = "resolved_by_author", "Resolved by Author"
+        # Signal automatically expired due to age-based retention.
+        AUTO_EXPIRED = "auto_expired", "Auto Expired"
+        # Signal was flagged by the community and awaits moderation.
+        FLAGGED_FOR_REVIEW = "flagged_for_review", "Flagged for Review"
+
     # Spatial point describing where the hazard was reported.
     location = models.PointField()
     # Hazard category used for map filtering and analytics.
@@ -35,6 +45,13 @@ class Hazard(models.Model):
     author_name = models.CharField(max_length=100, default="Anonymous")
     # Soft-delete flag controlling whether hazard is visible in the app.
     is_active = models.BooleanField(default=True)
+    # Lifecycle status used for moderation and audit transparency.
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+        db_index=True,
+    )
     # Creation timestamp for audit and sorting.
     created_at = models.DateTimeField(auto_now_add=True)
     # Last update timestamp for synchronization and edits.
@@ -53,6 +70,23 @@ class HazardVote(models.Model):
         # Enforce one vote per user for each hazard.
         constraints = [
             models.UniqueConstraint(fields=["user", "hazard"], name="unique_hazard_vote")
+        ]
+
+
+class HazardFlag(models.Model):
+    # User who reported this hazard as invalid or outdated.
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="hazard_flags")
+    # Hazard that was reported by the community.
+    hazard = models.ForeignKey(Hazard, on_delete=models.CASCADE, related_name="flags")
+    # Optional reason selected by the reporting user.
+    reason = models.CharField(max_length=32, default="outdated")
+    # Creation timestamp for moderation audit.
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # Enforce one community report per user per hazard.
+        constraints = [
+            models.UniqueConstraint(fields=["user", "hazard"], name="unique_hazard_flag")
         ]
 
 
