@@ -21,13 +21,26 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+
+
+def _env_csv(name: str, default: str = "") -> list[str]:
+    raw = os.getenv(name, default)
+    items = [item.strip() for item in raw.split(",")]
+    return [item for item in items if item]
+
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-xww(_#i$cj-#4v_7ytz8hwpj9nrftvoej^u^mfqz(*(f9^(@v$'
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-secret-change-me")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = _env_bool("DJANGO_DEBUG", True)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = _env_csv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
 
 
 # Application definition
@@ -149,8 +162,11 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Allow all origins during local development.
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS configuration: default to localhost frontend during development.
+DJANGO_CORS_ALLOWED_ORIGINS = _env_csv("DJANGO_CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+CORS_ALLOW_ALL_ORIGINS = _env_bool("DJANGO_CORS_ALLOW_ALL_ORIGINS", not DJANGO_CORS_ALLOWED_ORIGINS)
+if DJANGO_CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS = DJANGO_CORS_ALLOWED_ORIGINS
 
 # Media file configuration for user-uploaded hazard images.
 MEDIA_URL = '/media/'
